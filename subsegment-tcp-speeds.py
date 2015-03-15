@@ -12,7 +12,7 @@ usage_string="""Usage: Program for helping to isolate which sub-segment in a net
 
 Formally, it works as chain of network proxies with send measure headers among each proxy in the chain.
 Invocation:
-     subsegment-speeds.py  [-{t|timeout} <timeout>]  [-{l|listen} <listen-addr>]  [-{f|forward-to} <forward-to-address>]  [-{r|remove-perf-headers}]
+     subsegment-speeds.py  [-{t|timeout} <timeout>]  [-{l|listen} <listen-addr>]  [-{f|forward-to} <forward-to-address>]  -{s|stdin-block-size} <std-in-block-size>   [-{r|remove-perf-headers}]
 
      Command-line arguments:
 
