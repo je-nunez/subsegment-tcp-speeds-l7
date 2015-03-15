@@ -1,8 +1,10 @@
 # subsegment-tcp-speeds-l7
 in time-sensitive networks, to find which network subsegment has the highest increase in TCP delay (similar to tcptraceroute but higher in the protocol-stack and not using the IP TTL field, because when the TTL expires, this condition is handled immediately in kernel mode)
 
-Usage: Program for helping to isolate which sub-segment in a network [or host] influences more in the delay of a network transmission.
+Usage: Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
+
 Formally, it works as chain of network proxies with send measure headers among each proxy in the chain.
+
 Invocation:
      subsegment-tcp-speeds.py  [-{t|timeout} <timeout>]  [-{l|listen} <listen-addr>]  [-{f|forward-to} <forward-to-address>]  [-{r|remove-perf-headers}]
 
