@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import sys, getopt, os, socket, select
+import sys, getopt, inspect, os, socket, select, fcntl
 
 try:
    import cPickle as pickle
@@ -8,7 +8,8 @@ except:
    import pickle
 
 
-usage_string="""Usage: Program for helping to isolate which sub-segment in a network [or host] influences more in the delay of a network transmission.
+usage_string="""Usage: Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
+
 Formally, it works as chain of network proxies with send measure headers among each proxy in the chain.
 Invocation:
      subsegment-speeds.py  [-{t|timeout} <timeout>]  [-{l|listen} <listen-addr>]  [-{f|forward-to} <forward-to-address>]  [-{r|remove-perf-headers}]
@@ -29,6 +30,10 @@ Invocation:
                                         If -{f|forward-to} is omitted, then there will be no forwarding, and this command invocation will echo-back to the -{l|listen} address 
                                         whatever it receives from it.
 
+          -{s|stdin-block-size} <std-in-block-size>:	Standard-input block size in bytes (default: 512)
+                                                    	If -{l|listen} is not used, the program will read from standard-input using the block-size indicated here.
+                                                    	These blocks so read are the ones that are then forwarded from this program to the next subsegment in the network (if 
+                                                    	there is one), or to stdout (if there are no -{f|forward-to} address).
 
           -{r|remove-perf-headers}:	whether to remove or not existing performance headers in a packet (default: do not remove performance headers in a packet)
 
@@ -49,9 +54,10 @@ remove_performance_headers_in_packet = False
 
 class Receiver:
 
-	def __init__(self, listening_address=None, timeout=10):
+	def __init__(self, listening_address=None, stdinp_block_size ):
 		# defaults:
-		self.input_fd = 0   # standard-input
+		self.input_fd = sys.stdin.fileno()  # standard-input
+		self.stdinp_block_size = 512
 		self.listening_socket = None   
 		self.receiving_socket = None
 
@@ -59,15 +65,17 @@ class Receiver:
 			# no listening address to listen to, so this receiver should read instead from standard-input
 			pass
 		else:
+			self.input_fd = None   # it needs to be accept() first -see next method
 			try: 
 				address, port = listening_address.split(":")
 				s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-				s.setblocking(0)
 				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				s.setblocking(0)
 				s.bind(( address, port))
 				s.listen(1)
 			except Exception, e:
-				sys.stderr.write("Error while listening at address %s. Exception type is: %s\n" % ( listening_address, e ) )
+				exception_context = inspect.currentframe()
+				sys.stderr.write("Error at line %d while listening at address %s. Exception type is: %s\n" % ( exception_context.f_lineno, listening_address, e ) )
 				s.close()
 				raise
 			else: 
@@ -80,7 +88,10 @@ class Receiver:
 			# We already have from the object constructor:
 			#       self.input_fd = 0   # standard-input
 			# that is the default
-			pass
+			# we read from stdin, so we make it non-blocking 
+			fd = sys.stdin.fileno()
+			fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+			fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 		else: 
 			client, address = self.listening_socket.accept()
 			self.receiving_socket = client
@@ -94,15 +105,29 @@ class Receiver:
 			if self.listening_socket is not None:
 				self.listening_socket.close()
 		except Exception, e:
-			sys.stderr.write("Error while closing listening socket. Exception type is: %s\n" % ( e ) )
+			exception_context = inspect.currentframe()
+			sys.stderr.write("Error at line %d while closing listening socket. Exception type is: %s\n" % ( exception_context.f_lineno, e ) )
 			raise
 
 
 	def receive(self):
+			data= ""
 			if self.receiving_socket is not None:
+				# we read from the receiving socket
 				data = pickle_receiv( self.receiving_socket )
 			else:
-				pass
+				fd = sys.stdin.fileno()
+				if ( self.input_fd is not None ) and ( self.input_fd == fd ):
+					# we read from standard-input
+					buff=""
+					while len(buff) < self.stdinp_block_size:
+                        			buff += sys.stdin.read( self.stdinp_block_size - len(buff) )
+
+					data = buff
+				else:
+					exception_context = inspect.currentframe()
+                        		sys.stderr.write("Error at line %d trying to read from receiver but receiver doesn't have an accepted socket connection nor the receiver is standard-input\n" % ( exception_context.f_lineno ) )
+                        		raise RuntimeError("Trying to read from receiver but receiver doesn't have an accepted socket connection nor the receiver is standard-input")
 			return data
 
 
@@ -136,7 +161,8 @@ class Forwarder:
 				s.connect((remote_addr, remote_port))
 				s.setblocking(0)
 			except: 
-				sys.stderr.write("Error while forwarding to address %s. Exception type is: %s" % ( forw_addr, e ) )
+				exception_context = inspect.currentframe()
+				sys.stderr.write("Error at line %d while forwarding to address %s. Exception type is: %s" % ( exception_context.f_lineno, forw_addr, e ) )
 				s.close()
 				raise
 			else: 
@@ -154,7 +180,8 @@ class Forwarder:
 			if self.forwarding_socket is not None:
 				self.forwarding_socket.close()
 		except Exception, e:
-			sys.stderr.write("Error while closing forwarding socket. Exception type is: %s" % ( e ) )
+			exception_context = inspect.currentframe()
+			sys.stderr.write("Error at line while closing forwarding socket. Exception type is: %s" % ( exception_context.f_lineno, e ) )
 			raise
 
 
@@ -177,23 +204,25 @@ def pickle_receiv( socket ):
 		lenght = socket.ntohl( struct.unpack("L", lenght_L) [0] )
 		buffer = ""
 		while len(buffer) < lenght:
-			buffer = socket.recv( length - len(buffer) )
-	except:
-		sys.stderr.write("Error while receiving from pickle-object from socket. Exception type is: %s" % ( e ) )
+			buffer += socket.recv( length - len(buffer) )
+	except Exception, e:
+		exception_context = inspect.currentframe()
+		sys.stderr.write("Error at line %d while receiving from pickle-object from socket. Exception type is: %s" % ( exception_context.f_lineno, e ) )
 		raise
 	else:
 		return pickle.loads(buffer)[0]
 
-
+### MAIN PROGRAM ###
 
 if __name__ == '__main__':
 
     timeout = 10
+    stdinp_block_size = 512
     listen_port = None
     forward_to_addr = None
 
     try:
-        opts, remainder = getopt.getopt( sys.argv[1:], "ht:l:f:r", ["help", "timeout=", "listen=", "forward-to=", "remove-perf-headers" ])
+        opts, remainder = getopt.getopt( sys.argv[1:], "ht:l:f:s:r", ["help", "timeout=", "listen=", "forward-to=", "stdin-block-size=", "remove-perf-headers" ])
     except getopt.GetoptError as err:
         print "Error in arguments in the command-line:\n      " + str(err) + "\n"
         print usage_string
@@ -209,6 +238,8 @@ if __name__ == '__main__':
             listen_port = arg
         elif opt in ("-f", "--forward-to"):
             forward_to_addr = arg
+        elif opt in ("-s", "--stdin-block-size"):
+            stdinp_block_size = int( arg )
         elif opt in ("-r", "--remove-perf-headers"):
             remove_performance_headers_in_packet = True
 
@@ -221,7 +252,7 @@ if __name__ == '__main__':
     try:
 	if forward_to_addr is not None: forwarder = Forwarder( forward_to_addr )
 
-    	receiver = Receiver( listen_port, timeout )
+    	receiver = Receiver( listen_port, stdinp_block_size )
 	receiver.accept()
 	if forwarder is not None: forwarder.connect()
 

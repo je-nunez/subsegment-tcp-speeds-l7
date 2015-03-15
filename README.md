@@ -1,5 +1,12 @@
 # subsegment-tcp-speeds-l7
-in time-sensitive networks, to find which network subsegment has the highest increase in TCP delay (similar to tcptraceroute but higher in the protocol-stack and not using the IP TTL field, because when the TTL expires, this condition is handled immediately in kernel mode)
+In time-sensitive networks, to find which network subsegment has the highest increase in TCP delay (similar to tcptraceroute but higher in the protocol-stack and not using the IP TTL field, because when the TTL expires, this condition is handled immediately in kernel mode)
+
+This is similar in idea (although this program is raw TCP) to what HAProxy can do with its instruction:
+
+	http-request add-header "X-my-header-timeStamp-at-Proxy"  "%ms"
+        (or better,  http-request add-header "X-my-header-timeStamp-at-Proxy"  "%f %ms" )
+
+where "%ts" is the timestamp in milliseconds when this HTTP header is added by the HTTP proxy HAProxy ( for internals, see http://git.haproxy.org/?p=haproxy-1.5.git;a=blob;f=src/log.c;hb=HEAD#l1140 about the usage of "%ms"). (Disclaimer: this program is not at the HTTP level, but at the TCP level, and it is inspired by that possibility, but does not utilize that code). (So far, HAProxy allows those custom values, as "%ms", in custom http-headers; nginx will have it soon: http://wiki.nginx.org/HttpHeadersMoreModule#TODO )
 
 Usage: Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
 
