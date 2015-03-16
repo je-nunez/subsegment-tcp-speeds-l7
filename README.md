@@ -63,25 +63,26 @@ Formally, it works as chain of network proxies with send measure headers among e
 
 Example:
 
-      This is an example with four hosts making up the chain of sub-segments in the network, 
-      A<->B, B<->C, C<->D:
+      This is an example with four hosts making up the chain of communication sub-segments in the 
+      network, the client A works with (connects to) B, B to C, and C to Z. B can be in another 
+      co-location or geographically remote in comparison to A, or be an entry point with heavy-load 
+      to another network, etc. The same applies with C in comparison to B, it can be in another 
+      co-location or geographically remote in comparison to C, etc; and so on in this 
+      time-sensitive computer network.
            
            source host A:
 
                     subsegment-tcp-speeds.py  --forward-to  <host-B>:9000  
                     
                         In this case, A forwards its standard-input to the proxy at B, and gets 
-                        its answer (and time-delay stats) from B. B can be in another co-location 
-                        or geographically remote, or be an entry point with heavy-load to another 
-                        network, etc.
+                        its answer (and time-delay stats) from B. 
 
            intermediate host B:
 
                     subsegment-tcp-speeds.py  --listen  '*:9000'  --forward-to  <host-C>:9000  
                     
                         In this case, B forwards its standard-input to the proxy at C, and gets 
-                        its answer (and time-delay stats) from C. The location of C may be remote 
-                        in reference to B, as in the first communication sub-segment A<->B.
+                        its answer (and time-delay stats) from C.
 
            intermediate host C:
 
