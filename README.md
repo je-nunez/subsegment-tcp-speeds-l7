@@ -64,11 +64,12 @@ Formally, it works as chain of network proxies with send measure headers among e
 Example:
 
       This is an example with four hosts making up the chain of communication sub-segments in the 
-      network, the client A works with (connects to) B, B to C, and C to Z. B can be in another 
-      co-location or geographically remote in comparison to A, or be an entry point with heavy-load 
-      to another network, etc. The same applies with C in comparison to B, it can be in another 
-      co-location or geographically remote in comparison to C, etc; and so on in this 
-      time-sensitive computer network.
+      network, the client A works with (connects to) B, B to C, and C to Z. 
+      
+      B can be in another co-location or geographically remote in comparison to A, or be an entry 
+      point with heavy-load to another network, etc. The same applies with C in comparison to B, 
+      it can be in another co-location or geographically remote in comparison to C, etc; and so 
+      on in this time-sensitive computer network.
            
            source host A:
 
