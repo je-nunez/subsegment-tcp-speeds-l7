@@ -94,7 +94,7 @@ Example:
 
            end host Z:
 
-                    subsegment-tcp-speeds.py  --listen  <host-B>:9000  
+                    subsegment-tcp-speeds.py  --listen  '*:9000'
 
                         In this case, Z doesn't use a --forward-to option, so it is the end 
                         backend which resolves client A's initial request. This script simply 
