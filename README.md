@@ -57,19 +57,45 @@ Formally, it works as chain of network proxies with send measure headers among e
                                         address).
      
      
-          -{r|-remove-perf-headers}:     whether to remove or not existing performance headers in a packet (default: do not remove performance headers in a packet)
+          -{r|-remove-perf-headers}:     whether to remove or not existing performance headers in a 
+                                         packet (default: do not remove performance headers in a packet)
      
 
 Example:
-      This is an example with four hosts making up the chain of sub-segments in the network, A<->B, B<->C, C<->D:
 
+      This is an example with four hosts making up the chain of sub-segments in the network, 
+      A<->B, B<->C, C<->D:
+           
            source host A:
+
+                    subsegment-tcp-speeds.py  --forward-to  <host-B>:9000  
+                    
+                        In this case, A forwards its standard-input to the proxy at B, and gets 
+                        its answer (and time-delay stats) from B. B can be in another co-location 
+                        or geographically remote, or be an entry point with heavy-load to another 
+                        network, etc.
 
            intermediate host B:
 
+                    subsegment-tcp-speeds.py  --listen  '*:9000'  --forward-to  <host-C>:9000  
+                    
+                        In this case, B forwards its standard-input to the proxy at C, and gets 
+                        its answer (and time-delay stats) from C. The location of C may be remote 
+                        in reference to B, as in the first communication sub-segment A<->B.
+
            intermediate host C:
+
+                    subsegment-tcp-speeds.py  --listen  '*:9000'  --forward-to  <host-Z>:9000  
+                    
+                        In this case, C forwards its standard-input to the proxy at Z, and gets 
+                        its answer (and time-delay stats) from Z.
 
            end host Z:
 
+                    subsegment-tcp-speeds.py  --listen  <host-B>:9000  
 
+                        In this case, Z doesn't use a --forward-to option, so it is the end 
+                        backend which resolves client A's initial request. This script simply 
+                        echoes back the initial request, so it sends back A's standard-input 
+                        back to A (and time-delay stats).
 
