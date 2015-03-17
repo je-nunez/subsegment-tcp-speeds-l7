@@ -9,7 +9,14 @@ This is similar in idea (although this program works on raw TCP) to what HAProxy
                 http-request add-header "X-my-http-header-timeStamp-at-Proxy"  "%ms"
                 # (or better,  http-request add-header "X-my-http-header-timeStamp-at-Proxy"  "%f %ms" )
 
+        Or Squid in a reverse-proxy situation with:
+         
+                squid.conf:
+                       ...
+                       request_header_add  X-my-http-header-timeStamp-at-Proxy  "%tS"
+
 where "%ms" is the timestamp in milliseconds when this HTTP header is added by the HTTP proxy ( for internals, see http://git.haproxy.org/?p=haproxy-1.5.git;a=blob;f=src/log.c;hb=HEAD#l1140 about the usage of "%ms"). (Disclaimer: the current python program is not at the HTTP level as HAProxy can be, but at the TCP level, and it is inspired by that idea in HAProxy, but does not utilize that code). (So far, HAProxy allows those custom values, as "%ms", in custom http-headers; nginx will have it soon: http://wiki.nginx.org/HttpHeadersMoreModule#TODO )
+
 
 Usage: 
 
@@ -69,7 +76,7 @@ Example:
       B can be in another co-location or geographically remote in comparison to A, or be an entry 
       point with heavy-load to another network, etc. The same applies with C in comparison to B, 
       it can be in another co-location or geographically remote in comparison to C, etc; and so 
-      on in this time-sensitive computer network.
+      on in this delay-sensitive computer network.
            
            source host A:
 
