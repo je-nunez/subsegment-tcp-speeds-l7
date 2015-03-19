@@ -1,4 +1,4 @@
-# subsegment-tcp-speeds-l7
+# subsegment_tcp_speeds-l7
 
 In time-sensitive networks, to find which network subsegment has the highest increase in TCP delay (similar to tcptraceroute but higher in the protocol-stack and not using the IP TTL field, because when the TTL expires, this condition is handled immediately in kernel mode)
 
@@ -26,7 +26,7 @@ Formally, it works as chain of network proxies with send measure headers among e
 
      Invocation:
      
-          subsegment-tcp-speeds.py  [-{t|-timeout} <timeout>]  [-{l|-listen} <listen-addr>]  [-{f|-forward-to} <forward-to-address>]  -{s|-stdin-block-size} <std-in-block-size>   [-{r|-remove-perf-headers}]
+          subsegment_tcp_speeds.py  [-{t|-timeout} <timeout>]  [-{l|-listen} <listen-addr>]  [-{f|-forward-to} <forward-to-address>]  -{s|-stdin-block-size} <std-in-block-size>   [-{r|-remove-perf-headers}]
      
      Command-line arguments:
      
@@ -80,28 +80,28 @@ Example:
            
            source host A:
 
-                    subsegment-tcp-speeds.py  --forward-to  <host-B>:9000  
+                    subsegment_tcp_speeds.py  --forward-to  <host-B>:9000  
                     
                         In this case, A forwards its standard-input to the proxy at B, and gets 
                         its answer (and time-delay stats) from B. 
 
            intermediate host B:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'  --forward-to  <host-C>:9000  
+                    subsegment_tcp_speeds.py  --listen  '*:9000'  --forward-to  <host-C>:9000  
                     
                         In this case, B forwards its standard-input to the proxy at C, and gets 
                         its answer (and time-delay stats) from C.
 
            intermediate host C:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'  --forward-to  <host-Z>:9000  
+                    subsegment_tcp_speeds.py  --listen  '*:9000'  --forward-to  <host-Z>:9000  
                     
                         In this case, C forwards its standard-input to the proxy at Z, and gets 
                         its answer (and time-delay stats) from Z.
 
            end host Z:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'
+                    subsegment_tcp_speeds.py  --listen  '*:9000'
 
                         In this case, Z doesn't use a --forward-to option, so it is the end 
                         backend which resolves client A's initial request. This script simply 
