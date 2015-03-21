@@ -17,6 +17,11 @@ This is similar in idea (although this program works on raw TCP) to what HAProxy
 
 where "%ms" is the timestamp in milliseconds when this HTTP header is added by the HTTP proxy ( for internals, see http://git.haproxy.org/?p=haproxy-1.5.git;a=blob;f=src/log.c;hb=HEAD#l1140 about the usage of "%ms"). (Disclaimer: the current python program is not at the HTTP level as HAProxy can be, but at the TCP level, and it is inspired by that idea in HAProxy, but does not utilize that code). (So far, HAProxy allows those custom values, as "%ms", in custom http-headers; nginx will have it soon: http://wiki.nginx.org/HttpHeadersMoreModule#TODO )
 
+Custom http headers for the time at each processing host can be similar to the `Via:` http header, where each intermediate host stamps itself in this header (by appending to the Via-value, not by adding more http headers). E.g., this `Via:` value:
+
+        Via: 1.1 v1-akamaitech.net(ghost) (AkamaiGHost), 1.1 akamai.net(ghost) (AkamaiGHost), 1.1 cach06 (squid/3.5.1)
+        
+        http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.45
 
 Usage: 
 
