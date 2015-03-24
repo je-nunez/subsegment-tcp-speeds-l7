@@ -130,7 +130,7 @@ class Receiver(object):
                 list_sock.bind((address, int(port)))
                 list_sock.listen(1)
             except Exception as an_exc:    # generic Exception will be re-raised
-                sys.stderr.write("Error at line %d while listening at addr %s." 
+                sys.stderr.write("Error at line %d while listening at addr %s."
                                  " Exception type is: %s\n" % \
                       (sys.exc_info()[-1].tb_lineno, listening_address, an_exc))
                 list_sock.close()
@@ -165,6 +165,24 @@ class Receiver(object):
                              " Exception type is: %s\n" % \
                                (sys.exc_info()[-1].tb_lineno, an_exc))
             raise
+
+
+    def _receiver_tstamp_fieldname(self):
+        """This is the field-name in the JSON structure with which
+           this receiver mark the JSON structure with the timestamp
+           it has when first receiving it (in the method receive()
+           below) and lastly when echoing-it back (in the method
+           send() below).
+           Other field-names for the JSON structure are possible,
+           e.g., with more information, as also putting the forwarder
+           in the field-name."""
+        if self.listening_socket is not None:
+            address, port = self.listening_socket.getsockname()
+            json_tstamp_fieldname = "X_My_TStamp_%s%d" % (address, port)
+            return json_tstamp_fieldname
+        else:
+            json_tstamp_fieldname = "X_My_TStamp_std_input"
+            return json_tstamp_fieldname
 
 
     def receive(self):
@@ -361,7 +379,7 @@ def main():
             try:
                 readable_set, dummy_writeable_set, exceptional_set = \
                                select.select(inputs, [], exceptions, timeout)
-                # a deep analysis on select(), epoll() and kqueue: 
+                # a deep analysis on select(), epoll() and kqueue:
                 # www.eecs.berkeley.edu/~sangjin/2012/12/21/epoll-vs-kqueue.html
                 #
             except select.error as an_exc:
@@ -402,9 +420,9 @@ def main():
             forwarder.close()
 
     except Exception as an_exc:    # catch generic Exception at main() block
-        sys.stderr.write("Main: Exception caught at file " + 
-                                (sys.exc_info()[2]).tb_frame.f_code.co_filename + 
-                         " line " + str((sys.exc_info()[2]).tb_lineno)  + 
+        sys.stderr.write("Main: Exception caught at file " +
+                                (sys.exc_info()[2]).tb_frame.f_code.co_filename +
+                         " line " + str((sys.exc_info()[2]).tb_lineno)  +
                          ". Exception " + str(sys.exc_info()[0]) + "\n")
 
 
