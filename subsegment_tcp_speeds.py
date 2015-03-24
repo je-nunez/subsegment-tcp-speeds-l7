@@ -94,6 +94,7 @@ import sys
 import getopt
 import socket
 import select
+import re
 import json
 
 
@@ -176,12 +177,20 @@ class Receiver(object):
            Other field-names for the JSON structure are possible,
            e.g., with more information, as also putting the forwarder
            in the field-name."""
+        my_host_domain_name = socket.gethostname()
+        # Take all the DNS non letters or digits characters and
+        # transform them into "_"
+        my_field_host_dom_n = re.sub(r"[^a-zA-Z0-9]", "_", my_host_domain_name)
+
         if self.listening_socket is not None:
-            address, port = self.listening_socket.getsockname()
-            json_tstamp_fieldname = "X_My_TStamp_%s%d" % (address, port)
+            listen_address, port = self.listening_socket.getsockname()
+            my_field_listen_addr = re.sub(r"[^a-zA-Z0-9]", "_", listen_address)
+            json_tstamp_fieldname = "X_My_TStamp_%s%s%d" % \
+                              (my_field_host_dom_n, my_field_listen_addr, port)
             return json_tstamp_fieldname
         else:
-            json_tstamp_fieldname = "X_My_TStamp_std_input"
+            json_tstamp_fieldname = "X_My_TStamp_std_input_%s" % \
+                                                          (my_field_host_dom_n)
             return json_tstamp_fieldname
 
 
