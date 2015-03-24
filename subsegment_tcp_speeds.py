@@ -96,6 +96,8 @@ import socket
 import select
 import re
 import json
+import datetime
+import time
 
 
 class Receiver(object):
@@ -202,26 +204,28 @@ class Receiver(object):
             return json_tstamp_fieldname_uuid
 
 
+    def _receiver_tstamp_value(self):
+        """The current timestamp in the host in milliseconds."""
+        dt = datetime.now()
+        sec_since_epoch = time.mktime(dt.timetuple()) + dt.microsecond/1000000.0
+        epoch_in_millis = sec_since_epoch * 1000
+        return epoch_in_millis
+
+
     def receive(self):
-        sys.stderr.write("DEBUG: Receiving in the receiver\n")
         data = ""
         if self.receiving_socket is not None:
             # we need to read from the receiving socket a full json object
-            sys.stderr.write("DEBUG: Setting recv-socket back to blocking\n")
             self.receiving_socket.setblocking(1)
-            sys.stderr.write("DEBUG: Loading json objt from recv socket\n")
             data = json.load(self.receiving_socket)
-            sys.stderr.write("DEBUG: Setting recv sockt back to non-blocking\n")
             self.receiving_socket.setblocking(0)
         else:
             stdin_fd = sys.stdin.fileno()
             if (self.input_fd is not None) and (self.input_fd == stdin_fd):
                 # we read from standard-input
-                sys.stderr.write("DEBUG: Receiving in receiver from std-inpt\n")
                 input_chunks_list = []
                 while len(data) < self.stdinp_block_size:
                     chunk = sys.stdin.read(self.stdinp_block_size - len(data))
-                    sys.stderr.write("DEBUG: Just read stdin: s=%s\n" % (chunk))
                     if chunk == "":
                         # reached the state of EOF in this input fdescript
                         self.input_eof = True
@@ -230,8 +234,6 @@ class Receiver(object):
                         input_chunks_list.append(chunk)
 
                 data = ''.join(input_chunks_list)
-                sys.stderr.write("DEBUG: Just finished reading a block "
-                                 "from stdin: %s\n" % (str(data)))
             else:
                 sys.stderr.write("Error at line %d trying to read from receiver"
                           " but receiver doesn't have an accepted socket"
@@ -240,7 +242,6 @@ class Receiver(object):
                 raise RuntimeError("Trying to read from receiver but receiver"
                           " doesn't have an accepted socket connection nor "
                           " the receiver is standard-input")
-        sys.stderr.write("DEBUG: Before returning: data=%s\n" % (str(data)))
         return data
 
 
@@ -303,10 +304,7 @@ class Forwarder(object):
 
 
     def send(self, data_to_forward):
-        sys.stderr.write("DEBUG: Before sending data to forwarding socket: "
-                         "data=%s\n" % (str(data_to_forward)))
         if self.forwarding_socket is not None:
-            sys.stderr.write("DEBUG: Before json.dumps to forwarding socket\n")
             try:
                 json_repres = json.dumps(data_to_forward, sort_keys=True)
                 self.forwarding_socket.send(json_repres)
@@ -315,11 +313,9 @@ class Forwarder(object):
                             "the forwarding socket. Exception type is: %s\n" % \
                             (sys.exc_info()[-1].tb_lineno, an_exc))
                 raise
-        sys.stderr.write("DEBUG: Returning from sending to forwarding socket\n")
 
 
     def receive(self):
-        sys.stderr.write("DEBUG: Receiving data from forwarder\n")
         if self.forwarding_socket is not None:
             try:
                 self.forwarding_socket.setblocking(1)
@@ -330,8 +326,6 @@ class Forwarder(object):
                             "the forwarding socket. Exception type is: %s\n" % \
                             (sys.exc_info()[-1].tb_lineno, an_exc))
                 raise
-            sys.stderr.write("DEBUG: Received this data from forwarder before "
-                             "sending it to the receiver: %s\n" % (str(data)))
             return data
         else:
             sys.stderr.write("Error trying to read from the forwarding socket "
@@ -399,10 +393,8 @@ def main():
 
         receiver = Receiver(stdinp_block_size, listen_port)
         receiver.accept()
-        sys.stderr.write("DEBUG: Receiver just accepted connection\n")
         if forwarder is not None:
             forwarder.connect()
-        sys.stderr.write("DEBUG: Forwarder has connected\n")
 
         inputs = [receiver.input_fd]
         if forwarder is not None:
@@ -410,8 +402,6 @@ def main():
 
         while not receiver.eof():
 
-            sys.stderr.write("DEBUG: Before select() with inputs %s\n" % \
-                                 (str(inputs)))
             exceptions = inputs   # also check the inputs for exceptions
             try:
                 readable_set, dummy_writeable_set, exceptional_set = \
@@ -425,7 +415,6 @@ def main():
                             (sys.exc_info()[-1].tb_lineno, an_exc))
                 raise
 
-            sys.stderr.write("DEBUG: After select(), returning readable_set=" + str(readable_set) + " and exceptional_set=" + str(exceptional_set) +"\n")
             if exceptional_set:
                 # the exceptions-set of files has a file with an error
                 which_files_excepted = []
@@ -441,18 +430,10 @@ def main():
             # Read first from forwarder to see if it has answered something
             if (forwarder is not None) and (forwarder.input_fd in readable_set):
                 forw_data = forwarder.receive()
-                sys.stderr.write("DEBUG: Received this data from forwarder "
-                                 "before sending it to the receiver: %s\n" % \
-                                    (str(forw_data)))
                 receiver.send(forw_data)
 
             if receiver.input_fd in readable_set:
-                sys.stderr.write("DEBUG: Receiving data from receiver\n")
                 recv_data = receiver.receive()
-                sys.stderr.write("DEBUG: Received this data from receiver "
-                                 "before sending it to the forwarder or "
-                                 "echoing it back to the receiver: %s\n" % \
-                                     (str(recv_data)))
                 if forwarder is not None:
                     forwarder.send(recv_data)
                 else:
