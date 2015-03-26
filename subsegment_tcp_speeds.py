@@ -96,7 +96,6 @@ import socket
 import select
 import re
 import json
-import datetime
 import time
 
 
@@ -170,19 +169,19 @@ class Receiver(object):
             raise
 
 
-    def _receiver_tstamp_fieldname(self):
+    def _receiver_annotate_fieldname(self):
         """This is the field-name in the JSON structure with which
            this receiver mark the JSON structure with the timestamp
            it has when first receiving it (in the method receive()
            below) and lastly when echoing-it back (in the method
            send() below).
-           
-           In other words, as the network data passes through 
-           different hosts/proxies (each adding a field-name with its 
-           timestamp to the data), then this method here is to 
-           generate an Universal UID (UUID) as such field-name 
+
+           In other words, as the network data passes through
+           different hosts/proxies (each adding a field-name with its
+           timestamp to the data), then this method here is to
+           generate an Universal UID (UUID) as such field-name
            with which the proxy stamps its time.
-           
+
            Other field-names for the JSON structure are possible,
            e.g., with more information, as also putting the forwarder
            in the field-name."""
@@ -195,45 +194,58 @@ class Receiver(object):
         if self.listening_socket is not None:
             listen_address, port = self.listening_socket.getsockname()
             my_field_listen_addr = re.sub(r"[^a-zA-Z0-9]", "_", listen_address)
-            json_tstamp_fieldname_uuid = "X_My_TStamp_%s%s%d" % \
+            json_tstamp_fieldname_uuid = "X_My_Annotation_%s%s%d" % \
                               (my_field_host_dom_n, my_field_listen_addr, port)
             return json_tstamp_fieldname_uuid
         else:
-            json_tstamp_fieldname_uuid = "X_My_TStamp_std_input_%s" % \
+            json_tstamp_fieldname_uuid = "X_My_Annotation_std_input_%s" % \
                                                           (my_field_host_dom_n)
             return json_tstamp_fieldname_uuid
 
 
-    def _receiver_tstamp_value(self):
-        """The current timestamp in the host in milliseconds."""
-        dt = datetime.now()
-        sec_since_epoch = time.mktime(dt.timetuple()) + dt.microsecond/1000000.0
-        epoch_in_millis = sec_since_epoch * 1000
-        return epoch_in_millis
+    def _receiver_value_to_annotate(self):
+        """What value to annotate in the data by passing through this proxy.
+           We just annotate only the current time in this proxy."""
+        epoch_in_millis = time.time()
+        return str(epoch_in_millis)
 
 
     def receive(self):
-        data = ""
+        # annotate the incoming object adding a new field with this receiver
+        # time-stamp and its timestamp
+        incoming_tstamp_value = self._receiver_value_to_annotate()
+        field_name = self._receiver_annotate_fieldname()
+        incoming_object = None
         if self.receiving_socket is not None:
             # we need to read from the receiving socket a full json object
             self.receiving_socket.setblocking(1)
-            data = json.load(self.receiving_socket)
+            incoming_object = json.load(self.receiving_socket)
             self.receiving_socket.setblocking(0)
+            if isinstance(incoming_object, dict):
+                # annotate the incoming object if it is a dict, otherwise don't
+                incoming_object[field_name] = incoming_tstamp_value
         else:
             stdin_fd = sys.stdin.fileno()
             if (self.input_fd is not None) and (self.input_fd == stdin_fd):
                 # we read from standard-input
                 input_chunks_list = []
-                while len(data) < self.stdinp_block_size:
-                    chunk = sys.stdin.read(self.stdinp_block_size - len(data))
+                accumulated_bytes_read = 0
+                while accumulated_bytes_read < self.stdinp_block_size:
+                    chunk = sys.stdin.read(self.stdinp_block_size -
+					        accumulated_bytes_read)
                     if chunk == "":
                         # reached the state of EOF in this input fdescript
                         self.input_eof = True
                         break
                     else:
                         input_chunks_list.append(chunk)
+                        accumulated_bytes_read += len(chunk)
 
                 data = ''.join(input_chunks_list)
+                # always annotate the incoming line, creating a dictionary
+                incoming_object = {}
+                incoming_object[field_name] = incoming_tstamp_value
+                incoming_object['raw_line'] = data
             else:
                 sys.stderr.write("Error at line %d trying to read from receiver"
                           " but receiver doesn't have an accepted socket"
@@ -242,19 +254,43 @@ class Receiver(object):
                 raise RuntimeError("Trying to read from receiver but receiver"
                           " doesn't have an accepted socket connection nor "
                           " the receiver is standard-input")
-        return data
+        return incoming_object
 
 
     def send(self, data_back_to_receiver):
         if self.receiving_socket is not None:
             # send the data back to the receiving socket, from which it had
             # been received
+            # annotate the incoming data adding a new field with this receiver
+            # time-stamp and its timestamp
+            outgoing_tstamp_value = self._receiver_value_to_annotate()
+            field_name = self._receiver_annotate_fieldname()
+            if is_instance(data_back_to_receiver, dict):
+                if field_name in data_back_to_receiver:
+                    # field_name has already been annotated in the dict
+                    # annotate it again with the delay
+                    original_annotation = data_back_to_receiver[field_name]
+                    delay = float(outgoing_tstamp_value) - \
+                                       float(original_annotation)
+                    new_annotation = "{} {} ({})".format(original_annotation,
+							 outgoing_tstamp_value,
+							 delay)
+                    data_back_to_receiver[field_name] = new_annotation
+            # send the data
             json_repres = json.dumps(data_back_to_receiver, sort_keys=True)
             self.receiving_socket.send(json_repres)
 
         else:
             # there had not been a receiving socket, but the data had been
             # read from stdin, so we print it to stdout
+            if is_instance(data_back_to_receiver, dict):
+                # process all the annotations that were recorded by proxies
+                # in this dictionary
+                for k in data_back_to_receiver:
+                    if k.startswith("X_My_Annotation_"):
+                        sys.stderr.write("Visited %s at %s\n", k,
+					 data_back_to_receiver[k])
+                        del data_back_to_receiver[k]   # remove the annotation
             sys.stdout.write(str(data_back_to_receiver))
 
 
