@@ -346,9 +346,9 @@ class Receiver(object):
                     # one with the delay in send()
                     data_back_to_receiver[note_field_name] = new_note_by_send
                 except ValueError as an_exc:
-                    # the float(<from-string>) conversion did raise an except
-                    # so this send() couldn't find the delay to re-annotate with
-                    # what to do? delete the old (partial) annotation by
+                    # the float(<from-string>) conversion did raise an exception
+                    # so this send() couldn't find delay to re-annotate with.
+                    # What to do? Delete the old (partial) annotation by
                     # receive() that only has the original tstamp? or leave it?
                     #
                     # del data_back_to_receiver[note_field_name]
