@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 # We use narrow exception-catching in some places (as in "except select.error
-#   ..." below) but in other places we use broad-exception catching (also
-# called bare exception catching) for printing context-sensitive help)
-# ___immediately followed by a re-raise of # the exception___. See:
+#   ..." and "except ValueError ..." below) but in other places we use
+# broad-exception catching (also called bare exception catching) for printing
+# context-sensitive help) ___immediately followed by a re-raise of the
+# exception___. See:
 #
 # https://www.python.org/dev/peps/pep-0008/#id42
 #    ...
@@ -317,37 +318,54 @@ class Receiver(object):
         report accumulated annotations by all the proxies in the network
         path, if these annotations exist inside 'data_back_to_receiver'."""
 
-        outgoing_tstamp_value = self._receiver_value_to_annotate()
-        note_field_name = self._receiver_annotate_fieldname()
-
         # annotate the incoming data before sending it back, adding a new field
         # with this receiver time-stamp and its timestamp
         if isinstance(data_back_to_receiver, dict) and \
             not self.disable_pkt_annotations:
             # This receiver has requested to locally annotate the visiting
-            # packet: see if it was so annotated by the receive() method
-            # above
+            # packet. Get which local value and local field name to annotate
+            # with.
+            new_tstamp_value = self._receiver_value_to_annotate()
+            note_field_name = self._receiver_annotate_fieldname()
+
+            # See if it was annotated by the receive() method above with
+            # the key [note_field_name] in the dictionary data_back_to_receiver
             if note_field_name in data_back_to_receiver:
                 # note_field_name was already annotated in the dict by receive()
                 # Annotate it again here in send() with the delay between
                 # send() and the original receive() of this dict
                 old_note_by_receive = data_back_to_receiver[note_field_name]
-                delay = float(outgoing_tstamp_value) - \
-                                   float(old_note_by_receive)
-                new_note_by_send = "{} {} ({})".format(old_note_by_receive,
-	    					  outgoing_tstamp_value,
-	    					  delay)
-                # replace the old, partial annotation by receive() with new
-                # one with the delay in send()
-                data_back_to_receiver[note_field_name] = new_note_by_send
+                try:
+                    # this float(<from-string>) conversion could raise an except
+                    delay = float(new_tstamp_value) - float(old_note_by_receive)
+
+                    new_note_by_send = "{} {} ({})".format(old_note_by_receive,
+	    					           new_tstamp_value,
+	    					           delay)
+                    # replace the old, partial annotation by receive() with new
+                    # one with the delay in send()
+                    data_back_to_receiver[note_field_name] = new_note_by_send
+                except ValueError as an_exc:
+                    # the float(<from-string>) conversion did raise an except
+                    # so this send() couldn't find the delay to re-annotate with
+                    # what to do? delete the old (partial) annotation by
+                    # receive() that only has the original tstamp? or leave it?
+                    #
+                    # del data_back_to_receiver[note_field_name]
+                    #
+                    # report the conversion error and continue processing
+                    sys.stderr.write("Error at line %d while finding delay. " \
+                                      "Object-annotations were: %s and %s. " \
+                                      "Exception type is: %s\n" % \
+                                      (sys.exc_info()[-1].tb_lineno, \
+				       old_note_by_receive, \
+				       new_tstamp_value, an_exc))
 
         if self.receiving_socket is not None:
             # send the data back to the receiving socket, from which it had
             # been received
-            # send the data
             json_repres = json.dumps(data_back_to_receiver)
             self.receiving_socket.send(json_repres)
-
         else:
             # there had not been a receiving socket, but the data had been
             # read from stdin, so we print it to stdout
@@ -369,6 +387,7 @@ class Receiver(object):
                 sys.stdout.write(str(data_back_to_receiver['raw_line']))
                 return
             sys.stdout.write(str(data_back_to_receiver))
+
 
 
     def eof(self):
