@@ -121,11 +121,10 @@ Formally, it works as chain of network proxies with send measure headers among e
 
 # Practical use:
 
-Besides manual invocation, a utility like this can be integrated under a 
-monitoring and graphing system to receive the annotations of each proxy 
-(processing hop) through a path of proxies A<->B<->C...<->Z, so it can graph and 
-alert when the annotations of the delays on each subsegment are out of the SLA 
-parameters (for that subsegment). 
+A utility like this can be integrated under a monitoring and graphing system to 
+receive the annotations of each proxy (processing hop) through a path of proxies
+A<->B<->C...<->Z, so it can graph and alert when the annotations of the delays 
+on each subsegment are out of the SLA parameters (for that subsegment). 
 
 The difference between a utility like this and `traceroute`, is that `traceroute`
 operates usually at the kernel level when the kernel answers with an `ICMP TTL 
