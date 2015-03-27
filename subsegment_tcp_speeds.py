@@ -329,8 +329,8 @@ class Receiver(object):
             # above
             if note_field_name in data_back_to_receiver:
                 # note_field_name was already annotated in the dict by receive()
-                # Annotate it again here in send() the answer back with the
-                # delay
+                # Annotate it again here in send() with the delay between
+                # send() and the original receive() of this dict
                 old_note_by_receive = data_back_to_receiver[note_field_name]
                 delay = float(outgoing_tstamp_value) - \
                                    float(old_note_by_receive)
@@ -338,7 +338,7 @@ class Receiver(object):
 	    					  outgoing_tstamp_value,
 	    					  delay)
                 # replace the old, partial annotation by receive() with new
-                # one here in send() the answer back
+                # one with the delay in send()
                 data_back_to_receiver[note_field_name] = new_note_by_send
 
         if self.receiving_socket is not None:
