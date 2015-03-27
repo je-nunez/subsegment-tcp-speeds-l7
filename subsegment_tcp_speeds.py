@@ -315,7 +315,7 @@ class Receiver(object):
         a redirection of stderr to a file or to /dev/null be enough for this
         first version of the script: ie., this first version will always
         report accumulated annotations by all the proxies in the network
-        path."""
+        path, if these annotations exist inside 'data_back_to_receiver'."""
 
         outgoing_tstamp_value = self._receiver_value_to_annotate()
         note_field_name = self._receiver_annotate_fieldname()
