@@ -29,7 +29,7 @@ Custom http headers for the time at each processing host can be similar to the `
         
         http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.45
 
-Usage: 
+# Usage: 
 
 Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
 
@@ -79,7 +79,7 @@ Formally, it works as chain of network proxies with send measure headers among e
                                          packet (default: do not remove performance headers in a packet)
      
 
-Example:
+# Example:
 
       This is an example with four hosts making up the chain of communication sub-segments in the 
       network, the client A works with (connects to) B, B to C, and C to Z. 
@@ -118,4 +118,27 @@ Example:
                         backend which resolves client A's initial request. This script simply 
                         echoes back the initial request, so it sends back A's standard-input 
                         back to A (and time-delay stats).
+
+# Practical use:
+
+Besides manual invocation, a utility like this can be integrated under a 
+monitoring and graphing system to receive the annotations of each proxy 
+(processing hop) through a path of proxies A<->B<->C...<->Z, so it can graph and 
+alert when the annotations of the delays on each subsegment are out of the SLA 
+parameters (for that subsegment). 
+
+The difference between a utility like this and `traceroute`, is that `traceroute`
+operates usually at the kernel level when the kernel answers with an `ICMP TTL 
+exceeded` (except when the random port `traceroute` uses is open, in which case
+the packet does passes to user-land), and this utility works in user-mode only,
+so it is easier for it to suffer from, and reflect, high CPU load in its host, 
+than something at the kernel-level. Secondly, a utility like this can annotate
+in the processed data more variables along the path it visits, like many of the
+`SNMP MIB` variables (e.g., CPU load in the last 1, 5, and 15 minutes, etc). 
+Finally, in open networks between different companies, `traceroute` doesn't need 
+to traverse, in general, a pre-established set of hops A, B, C, ..., Z, unless 
+the `IP loose-source-routing` option is set in the request (and honored by 
+intermediate routers between those companies), which `IP loose-source-routing` 
+option also complicates the `TTL-expire` adjustment by `traceroute`, e.g., in 
+the case of dynamic, or self-organizing, networks.
 
