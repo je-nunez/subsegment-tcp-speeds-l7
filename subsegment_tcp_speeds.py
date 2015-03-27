@@ -1,5 +1,20 @@
 #!/usr/bin/env python
 
+# We use narrow exception-catching in some places (as in "except select.error
+#   ..." below) but in other places we use broad-exception catching (also
+# called bare exception catching) for printing context-sensitive help)
+# ___immediately followed by a re-raise of # the exception___. See:
+#
+# https://www.python.org/dev/peps/pep-0008/#id42
+#    ...
+#    A good rule of thumb is to limit use of bare 'except' clauses to two cases:
+#    1. If the exception handler will be printing out or logging the traceback;
+#    at least the user will be aware that an error has occurred.
+#
+# https://www.python.org/dev/peps/pep-3151/
+#
+# pylint: disable=broad-except
+# pylint: disable=line-too-long
 
 usage_string="""Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
 
@@ -109,13 +124,19 @@ class Receiver(object):
     data for this program, although it is given back the answered, reply data
     from the 'forwarder'"""
 
-    def __init__(self, stdinp_block_size, listening_address=None):
+    def __init__(self, stdinp_block_size, listening_address=None, \
+		 disable_pkt_annotations=False):
         # defaults:
         self.input_fd = sys.stdin.fileno()  # standard-input
         self.stdinp_block_size = 512
         self.listening_socket = None
         self.receiving_socket = None
-        self.input_eof = False
+        self._input_eof = False
+
+        # Disable local annotations inside the packet about timestamps and
+        # delays recorded in this receiver. (Ie., this receiver will not add its
+        # own local measures inside the packet.)
+        self.disable_pkt_annotations = disable_pkt_annotations
 
         if listening_address is None:
             # no listening address to listen to, so this receiver should read
@@ -142,6 +163,11 @@ class Receiver(object):
 
 
     def accept(self):
+        """This is to accept a new incoming connection at
+        'self.listening_socket', if there is one: otherwise, if the
+        input is by standard-input, this method succeeds and returns
+        immediately."""
+
         if self.listening_socket is None:
             # There is no listening-socket, because this listener had been
             # constructed as to read from the standard input.
@@ -157,6 +183,8 @@ class Receiver(object):
 
 
     def close(self):
+        """Close the sockets."""
+
         try:
             if self.receiving_socket is not None:
                 self.receiving_socket.close()
@@ -206,8 +234,11 @@ class Receiver(object):
     def _receiver_value_to_annotate(self):
         """What value to annotate in the data by passing through this proxy.
            We just annotate only the current time in this proxy."""
-        epoch_in_millis = time.time()
-        return str(epoch_in_millis)
+        if not self.disable_pkt_annotations:
+            epoch_in_millis = time.time()
+            return str(epoch_in_millis)
+        else:
+            return ''  # Because the local-annotations are disabled at this hop
 
 
     def receive(self):
@@ -221,7 +252,8 @@ class Receiver(object):
             self.receiving_socket.setblocking(1)
             incoming_object = json.load(self.receiving_socket)
             self.receiving_socket.setblocking(0)
-            if isinstance(incoming_object, dict):
+            if isinstance(incoming_object, dict) and \
+               not self.disable_pkt_annotations:
                 # annotate the incoming object if it is a dict, otherwise don't
                 incoming_object[field_name] = incoming_tstamp_value
         else:
@@ -231,11 +263,11 @@ class Receiver(object):
                 input_chunks_list = []
                 accumulated_bytes_read = 0
                 while accumulated_bytes_read < self.stdinp_block_size:
-                    chunk = sys.stdin.read(self.stdinp_block_size -
-					        accumulated_bytes_read)
+                    chunk = sys.stdin.read(self.stdinp_block_size - \
+					    accumulated_bytes_read)
                     if chunk == "":
                         # reached the state of EOF in this input fdescript
-                        self.input_eof = True
+                        self._input_eof = True
                         break
                     else:
                         input_chunks_list.append(chunk)
@@ -244,80 +276,155 @@ class Receiver(object):
                 data = ''.join(input_chunks_list)
                 # always annotate the incoming line, creating a dictionary
                 incoming_object = {}
-                incoming_object[field_name] = incoming_tstamp_value
+                if not self.disable_pkt_annotations:
+                    incoming_object[field_name] = incoming_tstamp_value
                 incoming_object['raw_line'] = data
             else:
-                sys.stderr.write("Error at line %d trying to read from receiver"
-                          " but receiver doesn't have an accepted socket"
-                          " connection nor the receiver is standard-input\n" % \
+                sys.stderr.write("Error at line %d trying to read from " \
+                          " receiver but receiver doesn't have an accepted " \
+                          " socket connection nor the receiver is stdin\n" % \
                           (sys.exc_info()[-1].tb_lineno))
-                raise RuntimeError("Trying to read from receiver but receiver"
-                          " doesn't have an accepted socket connection nor "
+                raise RuntimeError("Trying to read from receiver but receiver" \
+                          " doesn't have an accepted socket connection nor " \
                           " the receiver is standard-input")
         return incoming_object
 
 
     def send(self, data_back_to_receiver):
+        """Send the data back to the initial sender. If the initial sender
+        had been to read from standard-input (ie., no self.receiving_socket),
+        then this method prints the received data back to standard-output.
+
+        Before sending the data back, this method updates the annotations in
+        the parameter 'data_back_to_receiver' with the local measures in this
+        proxy, if it has been asked to do so in by
+        'not self.disable_pkt_annotations'.
+
+        If this method has to print the data back to standard-output (ie.,
+        this proxy had been the initial origin of all the network path by
+        reading from standard-input), then this method also prints to stderr
+        all the annotations recorded inside 'data_back_to_receiver' by all
+        other proxies later visited during the network path or loop. (Note:
+        the report in this paragraph is independent of the option
+        self.disable_pkt_annotations which __disables the annotation of
+        measures__ at this proxy, but does not disable the __reporting of
+        collected annotations by other proxies visited in the path__.
+        Perhaps an option independent to self.disable_pkt_annotations to
+        explicitly disable this report is necessary. Leaving this option
+        off this first version because is not difficult to add, and probably,
+        a redirection of stderr to a file or to /dev/null be enough for this
+        first version of the script: ie., this first version will always
+        report accumulated annotations by all the proxies in the network
+        path."""
+
+        outgoing_tstamp_value = self._receiver_value_to_annotate()
+        note_field_name = self._receiver_annotate_fieldname()
+
+        # annotate the incoming data before sending it back, adding a new field
+        # with this receiver time-stamp and its timestamp
+        if isinstance(data_back_to_receiver, dict) and \
+            not self.disable_pkt_annotations:
+            # This receiver has requested to locally annotate the visiting
+            # packet: see if it was so annotated by the receive() method
+            # above
+            if note_field_name in data_back_to_receiver:
+                # note_field_name was already annotated in the dict by receive()
+                # Annotate it again here in send() the answer back with the
+                # delay
+                old_note_by_receive = data_back_to_receiver[note_field_name]
+                delay = float(outgoing_tstamp_value) - \
+                                   float(old_note_by_receive)
+                new_note_by_send = "{} {} ({})".format(old_note_by_receive,
+	    					  outgoing_tstamp_value,
+	    					  delay)
+                # replace the old, partial annotation by receive() with new
+                # one here in send() the answer back
+                data_back_to_receiver[note_field_name] = new_note_by_send
+
         if self.receiving_socket is not None:
             # send the data back to the receiving socket, from which it had
             # been received
-            # annotate the incoming data adding a new field with this receiver
-            # time-stamp and its timestamp
-            outgoing_tstamp_value = self._receiver_value_to_annotate()
-            field_name = self._receiver_annotate_fieldname()
-            if is_instance(data_back_to_receiver, dict):
-                if field_name in data_back_to_receiver:
-                    # field_name has already been annotated in the dict
-                    # annotate it again with the delay
-                    original_annotation = data_back_to_receiver[field_name]
-                    delay = float(outgoing_tstamp_value) - \
-                                       float(original_annotation)
-                    new_annotation = "{} {} ({})".format(original_annotation,
-							 outgoing_tstamp_value,
-							 delay)
-                    data_back_to_receiver[field_name] = new_annotation
             # send the data
-            json_repres = json.dumps(data_back_to_receiver, sort_keys=True)
+            json_repres = json.dumps(data_back_to_receiver)
             self.receiving_socket.send(json_repres)
 
         else:
             # there had not been a receiving socket, but the data had been
             # read from stdin, so we print it to stdout
-            if is_instance(data_back_to_receiver, dict):
-                # process all the annotations that were recorded by proxies
-                # in this dictionary
+            if isinstance(data_back_to_receiver, dict):
+                # print to std-error all the annotations that were recorded by
+                # proxies in this data (including this proxy itself just before
+                # printing to standard-output)
                 for k in data_back_to_receiver:
                     if k.startswith("X_My_Annotation_"):
                         sys.stderr.write("Visited %s at %s\n", k,
-					 data_back_to_receiver[k])
+					  data_back_to_receiver[k])
                         del data_back_to_receiver[k]   # remove the annotation
+
+            # Print the data to standard-output (the annotations were printed to
+            # standard-error just above)
+            if isinstance(data_back_to_receiver, dict) and \
+                'raw_line' in data_back_to_receiver:
+                # only print the 'raw_line' key (see receive() method above)
+                sys.stdout.write(str(data_back_to_receiver['raw_line']))
+                return
             sys.stdout.write(str(data_back_to_receiver))
 
 
     def eof(self):
-        return self.input_eof
+        """This is a property-method around the data-member 'self._input_eof'
+        that is set in self.receive() when the eof of the incoming connection
+        has been reached in 'self.receiving_socket'.
+
+        TODO: use the @property decorator."""
+
+        return self._input_eof
 
 
 
 
 class Forwarder(object):
     """The instance of this class represents the forwarder, which is always
-    a client connection to a socket in another network segment.
+    a client connection to a socket in another, 'next-hop', receiver.
 
-    The data received by this instance is the one that will be forwarded, in
-    JSON representation.
+    The data received by this instance is the one that will be forwarded to
+    that 'next-hop', in JSON representation.
 
     The 'forwarder' object will also read replies from the remote extreme in
     this network segment, which then will be passed back to the 'receiver'
-    object."""
+    object in this process.
+
+    A current difference between the Receiver and the Forwarder classes is
+    that the former annotates the JSON object with the local-variables (e.g.
+    the local timestamp at this hop), whereas the Forwarder does not annotate
+    the JSON object in principle (although there can be situations where both
+    sides, the receiver and the forwarder of this same script, should
+    annotate the JSON object each independently of the other)."""
 
     def __init__(self, forwarding_address=None):
+        """The forwarder object does not immediately connects to
+        the next-hop at 'forwarding_address' in the object-
+        constructor, but connects only when explicitly requested
+        to do so by calling this forwarder object's connect()
+        method (below).
+
+        This lazy connection is used in order that the controlling
+        script can wait for a connection in the receiver object,
+        and only then request the forwarder to connect to its
+        next-hop at 'forwarding_address'. (TODO: A downside of this
+        approach is that the very first incoming packet from the
+        receiver has to wait for the TCP-establishment of the new
+        forwarding TCP connection.)"""
 
         self.forwarding_address = forwarding_address
         self.forwarding_socket = None
+        self.input_fd = None
 
 
     def connect(self):
+        """This is to request the forwarder to establish the TCP connection to
+        its next-hop at 'self.forwarding_address'."""
+
         if self.forwarding_address is None:
             # This forwarder will merely echo-back whatever it receives
             pass
@@ -340,9 +447,12 @@ class Forwarder(object):
 
 
     def send(self, data_to_forward):
+        """This is to request the forwarder to send an object to its next-hop
+        at the connection 'self.forwarding_socket'."""
+
         if self.forwarding_socket is not None:
             try:
-                json_repres = json.dumps(data_to_forward, sort_keys=True)
+                json_repres = json.dumps(data_to_forward)
                 self.forwarding_socket.send(json_repres)
             except Exception as an_exc:    # generic Exception will be re-raised
                 sys.stderr.write("Error at line %d while sending data through "
@@ -352,6 +462,9 @@ class Forwarder(object):
 
 
     def receive(self):
+        """This is to request the forwarder to receive an object from its
+        next-hop at the connection 'self.forwarding_socket'."""
+
         if self.forwarding_socket is not None:
             try:
                 self.forwarding_socket.setblocking(1)
@@ -371,6 +484,9 @@ class Forwarder(object):
 
 
     def close(self):
+        """This is to request the forwarder to close the TCP connection with its
+        next-hop in 'self.forwarding_socket'."""
+
         if self.forwarding_socket is not None:
             try:
                 self.forwarding_socket.close()
@@ -387,12 +503,13 @@ class Forwarder(object):
 
 
 def main():
+    """Main() entry-point to this script."""
 
     timeout = 10
     stdinp_block_size = 512
     listen_port = None
     forward_to_addr = None
-    remove_perf_headers_in_packet = False
+    remove_perf_headers = False
 
     getopts_short = "ht:l:f:s:r"
     getopts_long = ["help", "timeout=", "listen=", "forward-to=", "stdin-block-size=", "remove-perf-headers"]
@@ -418,7 +535,7 @@ def main():
         elif opt in ("-s", "--stdin-block-size"):
             stdinp_block_size = int(arg)
         elif opt in ("-r", "--remove-perf-headers"):
-            remove_perf_headers_in_packet = True
+            remove_perf_headers = True
 
 
     receiver = None
@@ -427,7 +544,7 @@ def main():
         if forward_to_addr is not None:
             forwarder = Forwarder(forward_to_addr)
 
-        receiver = Receiver(stdinp_block_size, listen_port)
+        receiver = Receiver(stdinp_block_size, listen_port, remove_perf_headers)
         receiver.accept()
         if forwarder is not None:
             forwarder.connect()
