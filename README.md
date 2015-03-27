@@ -131,13 +131,13 @@ operates usually at the kernel level when the kernel answers with an `ICMP TTL
 exceeded` (except when the random port `traceroute` uses is open, in which case
 the packet does passes to user-land), and this utility works in user-mode only,
 so it is easier for it to suffer from, and reflect, high CPU load in its host, 
-than something at the kernel-level. Secondly, a utility like this can annotate
-in the processed data more variables along the path it visits, like many of the
-`SNMP MIB` variables (e.g., CPU load in the last 1, 5, and 15 minutes, etc). 
-Finally, in open networks between different companies, `traceroute` doesn't need 
-to traverse, in general, a pre-established set of hops A, B, C, ..., Z, unless 
-the `IP loose-source-routing` option is set in the request (and honored by 
-intermediate routers between those companies), which `IP loose-source-routing` 
-option also complicates the `TTL-expire` adjustment by `traceroute`, e.g., in 
-the case of dynamic, or self-organizing, networks.
+than the internal TCP/IP stack in the kernel. Secondly, a utility like this can 
+annotate in the processed data more variables along the path it visits, like 
+many of the `SNMP MIB` variables (e.g., CPU load in the last 1, 5, and 15 
+minutes, etc). Finally, in open networks between different companies, 
+`traceroute` doesn't need to traverse, in general, a pre-established set of hops
+A, B, C, ..., Z, unless the `IP loose-source-routing` option is set in the 
+request (and honored by intermediate routers between those companies), which 
+`IP loose-source-routing` option also complicates the `TTL-expire` adjustment by
+`traceroute`, e.g., in the case of dynamic, or self-organizing, networks.
 
