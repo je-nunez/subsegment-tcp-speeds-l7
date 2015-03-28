@@ -17,7 +17,19 @@
 # pylint: disable=broad-except
 # pylint: disable=line-too-long
 
-usage_string="""Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
+# **************
+# The docstring of this module is large, in difference to code lines that are
+# mostly limited to 80 chars in length, because, for the docstring the most
+# documentation tends to be the best, according to Donald E. Knuth's 'Literate
+# Programming' fable to Steve Job in the early '80s, and Knuth's effort in
+# this topic, and also, for lengthy docstrings, most common graphical terminals
+# have more than 80 characters-columns.
+# 
+# The code does try to abide by the 80 characters principle though, it is easier
+# to read and to comprehend.
+# **************
+
+"""Program for helping to isolate which sub-segment in a network [or proxy host in a network] influences more in the delay of a network transmission.
 
 Formally, it works as chain of network proxies with send measure headers among each proxy in the chain.
 
@@ -113,6 +125,23 @@ import select
 import re
 import json
 import time
+import os
+import inspect
+
+
+def usage():
+    """Print the usage of this script, taken from the docstring of the 
+    script."""
+    current_python_script_pathname = inspect.getfile(inspect.currentframe())
+    dummy_pyscript_dirname, pyscript_filename = \
+                os.path.split(os.path.abspath(current_python_script_pathname))
+    pyscript_filename = os.path.splitext( pyscript_filename )[0] # no extension
+    sys.stderr.write("DEBUG: Script-name %s\n" % (pyscript_filename))
+    pyscript_metadata = __import__(pyscript_filename)
+    pyscript_docstring = pyscript_metadata.__doc__
+    # TODO: process the docstring to obtain some sections in it as usage string
+    pyscript_usage = pyscript_docstring 
+    print pyscript_usage
 
 
 class Receiver(object):
@@ -123,7 +152,14 @@ class Receiver(object):
     JSON representation.
     This instance is called the 'receiver' since it is the only source of
     data for this program, although it is given back the answered, reply data
-    from the 'forwarder'"""
+    from the 'forwarder'
+
+    A current difference between the Receiver and the Forwarder classes 
+    (Forwarder is below) is that the Receiver annotates the JSON object with the
+    local-variables (e.g. the local timestamp at this hop), whereas the 
+    Forwarder does not annotate the JSON object in principle (although there can
+    be situations where both sides, the receiver and the forwarder of this same
+    script, should annotate the JSON object each independently of the other)."""
 
     def __init__(self, stdinp_block_size, listening_address=None, \
 		 disable_pkt_annotations=False):
@@ -243,6 +279,7 @@ class Receiver(object):
 
 
     def receive(self):
+        sys.stderr.write("DEBUG: Receiving in the receiver\n")
         # annotate the incoming object adding a new field with this receiver
         # time-stamp and its timestamp
         incoming_tstamp_value = self._receiver_value_to_annotate()
@@ -250,9 +287,13 @@ class Receiver(object):
         incoming_object = None
         if self.receiving_socket is not None:
             # we need to read from the receiving socket a full json object
+            sys.stderr.write("DEBUG: Setting recv-socket back to blocking\n")
             self.receiving_socket.setblocking(1)
+            sys.stderr.write("DEBUG: Loading json objt from recv socket\n")
             incoming_object = json.load(self.receiving_socket)
+            sys.stderr.write("DEBUG: Setting recv sockt back to non-blocking\n")
             self.receiving_socket.setblocking(0)
+            sys.stderr.write("DEBUG: Just read: incoming_object=%s\n" % (str(incoming_object)))
             if isinstance(incoming_object, dict) and \
                not self.disable_pkt_annotations:
                 # annotate the incoming object if it is a dict, otherwise don't
@@ -261,11 +302,13 @@ class Receiver(object):
             stdin_fd = sys.stdin.fileno()
             if (self.input_fd is not None) and (self.input_fd == stdin_fd):
                 # we read from standard-input
+                sys.stderr.write("DEBUG: Receiving in receiver from std-inpt\n")
                 input_chunks_list = []
                 accumulated_bytes_read = 0
                 while accumulated_bytes_read < self.stdinp_block_size:
                     chunk = sys.stdin.read(self.stdinp_block_size - \
 					    accumulated_bytes_read)
+                    sys.stderr.write("DEBUG: Just read stdin: s=%s\n" % (chunk))
                     if chunk == "":
                         # reached the state of EOF in this input fdescript
                         self._input_eof = True
@@ -275,6 +318,8 @@ class Receiver(object):
                         accumulated_bytes_read += len(chunk)
 
                 data = ''.join(input_chunks_list)
+                sys.stderr.write("DEBUG: Just finished reading a block " \
+                                 "from stdin: %s\n" % (str(data)))
                 # always annotate the incoming line, creating a dictionary
                 incoming_object = {}
                 if not self.disable_pkt_annotations:
@@ -469,7 +514,10 @@ class Forwarder(object):
         """This is to request the forwarder to send an object to its next-hop
         at the connection 'self.forwarding_socket'."""
 
+        sys.stderr.write("DEBUG: Before sending data to forwarding socket: "
+                         "data=%s\n" % (str(data_to_forward)))
         if self.forwarding_socket is not None:
+            sys.stderr.write("DEBUG: Before json.dumps to forwarding socket\n")
             try:
                 json_repres = json.dumps(data_to_forward)
                 self.forwarding_socket.send(json_repres)
@@ -478,12 +526,14 @@ class Forwarder(object):
                             "the forwarding socket. Exception type is: %s\n" % \
                             (sys.exc_info()[-1].tb_lineno, an_exc))
                 raise
+        sys.stderr.write("DEBUG: Returning from sending to forwarding socket\n")
 
 
     def receive(self):
         """This is to request the forwarder to receive an object from its
         next-hop at the connection 'self.forwarding_socket'."""
 
+        sys.stderr.write("DEBUG: Receiving data from forwarder\n")
         if self.forwarding_socket is not None:
             try:
                 self.forwarding_socket.setblocking(1)
@@ -494,6 +544,8 @@ class Forwarder(object):
                             "the forwarding socket. Exception type is: %s\n" % \
                             (sys.exc_info()[-1].tb_lineno, an_exc))
                 raise
+            sys.stderr.write("DEBUG: Received this data from forwarder before "
+                             "sending it to the receiver: %s\n" % (str(data)))
             return data
         else:
             sys.stderr.write("Error trying to read from the forwarding socket "
@@ -543,7 +595,7 @@ def main():
 
     for opt, arg in opts:
         if opt in ("-h", "--help"):
-            print usage_string
+            usage()
             sys.exit()
         elif opt in ("-t", "--timeout"):
             timeout = int(arg)
@@ -565,8 +617,10 @@ def main():
 
         receiver = Receiver(stdinp_block_size, listen_port, remove_perf_headers)
         receiver.accept()
+        sys.stderr.write("DEBUG: Receiver just accepted connection\n")
         if forwarder is not None:
             forwarder.connect()
+        sys.stderr.write("DEBUG: Forwarder has connected\n")
 
         inputs = [receiver.input_fd]
         if forwarder is not None:
@@ -574,6 +628,8 @@ def main():
 
         while not receiver.eof():
 
+            sys.stderr.write("DEBUG: Before select() with inputs %s\n" % \
+                                 (str(inputs)))
             exceptions = inputs   # also check the inputs for exceptions
             try:
                 readable_set, dummy_writeable_set, exceptional_set = \
@@ -587,6 +643,7 @@ def main():
                             (sys.exc_info()[-1].tb_lineno, an_exc))
                 raise
 
+            sys.stderr.write("DEBUG: After select(), returning readable_set=" + str(readable_set) + " and exceptional_set=" + str(exceptional_set) +"\n")
             if exceptional_set:
                 # the exceptions-set of files has a file with an error
                 which_files_excepted = []
@@ -602,10 +659,18 @@ def main():
             # Read first from forwarder to see if it has answered something
             if (forwarder is not None) and (forwarder.input_fd in readable_set):
                 forw_data = forwarder.receive()
+                sys.stderr.write("DEBUG: Received this data from forwarder "
+                                 "before sending it to the receiver: %s\n" % \
+                                    (str(forw_data)))
                 receiver.send(forw_data)
 
             if receiver.input_fd in readable_set:
+                sys.stderr.write("DEBUG: Receiving data from receiver\n")
                 recv_data = receiver.receive()
+                sys.stderr.write("DEBUG: Received this data from receiver "
+                                 "before sending it to the forwarder or "
+                                 "echoing it back to the receiver: %s\n" % \
+                                     (str(recv_data)))
                 if forwarder is not None:
                     forwarder.send(recv_data)
                 else:

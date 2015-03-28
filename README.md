@@ -121,24 +121,31 @@ Formally, it works as chain of network proxies with send measure headers among e
 
 # Practical use:
 
-A utility like this can be integrated under a monitoring and graphing system to 
-receive the annotations of each proxy (processing hop) through a path of proxies
-A<->B<->C...<->Z, so it can graph and alert when the annotations of the delays 
-on each subsegment are out of the SLA parameters (for that subsegment). 
+A utility like this can be integrated under a `monitoring and/or graphing system` 
+to receive the annotations of a packet along each proxy (processing hop) in a 
+path of proxies A<->B<->C...<->Z, so it can graph and alert when the annotations
+on the delays on any subsegment happens to be out of the SLA parameters (for 
+that subsegment). 
 
 The difference between a utility like this and `traceroute`, is that `traceroute`
 operates usually at the kernel level when the kernel answers with an `ICMP TTL 
 exceeded` (except when the random port `traceroute` uses is open, in which case
 the packet does passes to user-land), and this utility works in user-mode only,
 so it is easier for it to suffer from, and reflect, high CPU load in its host, 
-than the internal TCP/IP stack in the kernel. Secondly, a utility like this 
-offers more potentiality for annotating in the processed data more variables 
+than the internal TCP/IP stack inside the kernel. Secondly, a utility like this 
+offers more potentiality for annotating in the processed packets more variables 
 along the path it visits than is possible with `traceroute`, like to record many
 of the hop's `SNMP MIB` variables (e.g., CPU load in the last 1, 5, and 15
-minutes, etc). Finally, in open networks between different companies, 
-`traceroute` doesn't need to traverse, in general, a pre-established set of hops
-A, B, C, ..., Z, unless the `IP loose-source-routing` option is set in the 
-request (and honored by intermediate routers between those companies), which 
-`IP loose-source-routing` option also complicates the `TTL-expire` adjustment by
-`traceroute`, e.g., in the case of dynamic, or self-organizing, networks.
+minutes, etc). In this sense, a utility like this can not only isolate the 
+subsegment that is having delays, but directly try to investigate into the why 
+such subsegment happens to be outside its expected SLA range, and for this it 
+can conditionally query and annotate some SNMP MIB variables in it only when 
+that unexpected situation happens, following a playbook according to the 
+subsegment with issues and to how much the deviation from its SLA happens to be.
+Finally, in open networks between different companies, `traceroute` doesn't need
+to traverse, in general, a pre-established set of hops A, B, C, ..., Z, unless
+the `IP loose-source-routing` option is set in the request (and honored by 
+intermediate routers between those companies), which `IP loose-source-routing`
+option also complicates the `TTL-expire` adjustment by `traceroute`, e.g., in 
+the case of dynamic, or self-organizing, networks.
 
