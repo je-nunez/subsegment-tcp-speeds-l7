@@ -251,7 +251,7 @@ class Receiver(object):
            e.g., with more information, as also putting the forwarder
            in the field-name."""
 
-        my_host_domain_name = socket.gethostname()
+        my_host_domain_name = socket.getfqdn()
         # Take all the DNS non letters or digits characters and
         # transform them into "_"
         my_field_host_dom_n = re.sub(r"[^a-zA-Z0-9]", "_", my_host_domain_name)
@@ -290,7 +290,9 @@ class Receiver(object):
             sys.stderr.write("DEBUG: Setting recv-socket back to blocking\n")
             self.receiving_socket.setblocking(1)
             sys.stderr.write("DEBUG: Loading json objt from recv socket\n")
-            incoming_object = json.load(self.receiving_socket)
+            associated_file = self.receiving_socket.makefile('r')
+            incoming_object = json.load(associated_file)
+            associated_file.close()
             sys.stderr.write("DEBUG: Setting recv sockt back to non-blocking\n")
             self.receiving_socket.setblocking(0)
             sys.stderr.write("DEBUG: Just read: incoming_object=%s\n" % (str(incoming_object)))
@@ -409,8 +411,11 @@ class Receiver(object):
         if self.receiving_socket is not None:
             # send the data back to the receiving socket, from which it had
             # been received
-            json_repres = json.dumps(data_back_to_receiver)
-            self.receiving_socket.send(json_repres)
+            self.receiving_socket.setblocking(1)
+            associated_file = self.receiving_socket.makefile('w')
+            json.dump(data_back_to_receiver, associated_file)
+            associated_file.close()
+            self.receiving_socket.setblocking(0)
         else:
             # there had not been a receiving socket, but the data had been
             # read from stdin, so we print it to stdout
@@ -519,8 +524,11 @@ class Forwarder(object):
         if self.forwarding_socket is not None:
             sys.stderr.write("DEBUG: Before json.dumps to forwarding socket\n")
             try:
-                json_repres = json.dumps(data_to_forward)
-                self.forwarding_socket.send(json_repres)
+                self.forwarding_socket.setblocking(1)
+                associated_file = self.forwarding_socket.makefile('w')
+                json.dump(data_to_forward, associated_file)
+                associated_file.close()
+                self.forwarding_socket.setblocking(0)
             except Exception as an_exc:    # generic Exception will be re-raised
                 sys.stderr.write("Error at line %d while sending data through "
                             "the forwarding socket. Exception type is: %s\n" % \
@@ -537,7 +545,11 @@ class Forwarder(object):
         if self.forwarding_socket is not None:
             try:
                 self.forwarding_socket.setblocking(1)
-                data = json.load(self.forwarding_socket)
+                sys.stderr.write("DEBUG: Loading json objt from forwarding socket\n")
+                associated_file = self.forwarding_socket.makefile('r')
+                data = json.load(associated_file)
+                associated_file.close()
+                sys.stderr.write("DEBUG: Setting forwarding sockt back to non-blocking\n")
                 self.forwarding_socket.setblocking(0)
             except Exception as an_exc:    # generic Exception will be re-raised
                 sys.stderr.write("Error at line %d while receiving data from "
