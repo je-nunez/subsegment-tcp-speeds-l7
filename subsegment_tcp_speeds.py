@@ -590,7 +590,7 @@ def main():
                        getopt.getopt(sys.argv[1:], getopts_short, getopts_long)
     except getopt.GetoptError as err:
         print "Error in arguments in the command-line:\n   %s\n" % (str(err))
-        print usage_string
+        usage()
         sys.exit(2)
 
     for opt, arg in opts:
