@@ -168,6 +168,7 @@ class Receiver(object):
         self.stdinp_block_size = 512
         self.listening_socket = None
         self.receiving_socket = None
+        self._associated_file = None
         self._input_eof = False
 
         # Disable local annotations inside the packet about timestamps and
@@ -214,6 +215,7 @@ class Receiver(object):
             pass
         else:
             client, dummy_address = self.listening_socket.accept()
+            self._associated_file = client.makefile('rw')  # use only when setblocking(1)
             client.setblocking(0)
             self.receiving_socket = client
             self.input_fd = client.fileno()
@@ -224,6 +226,7 @@ class Receiver(object):
 
         try:
             if self.receiving_socket is not None:
+                self._associated_file.close()
                 self.receiving_socket.close()
             if self.listening_socket is not None:
                 self.listening_socket.close()
@@ -287,12 +290,9 @@ class Receiver(object):
         incoming_object = None
         if self.receiving_socket is not None:
             # we need to read from the receiving socket a full json object
-            sys.stderr.write("DEBUG: Setting recv-socket back to blocking\n")
+            sys.stderr.write("DEBUG: Setting recv-socket back to blocking to read from sock-file\n")
             self.receiving_socket.setblocking(1)
-            sys.stderr.write("DEBUG: Loading json objt from recv socket\n")
-            associated_file = self.receiving_socket.makefile('r')
-            incoming_object = json.load(associated_file)
-            associated_file.close()
+            incoming_object = json.load(self._associated_file)
             sys.stderr.write("DEBUG: Setting recv sockt back to non-blocking\n")
             self.receiving_socket.setblocking(0)
             sys.stderr.write("DEBUG: Just read: incoming_object=%s\n" % (str(incoming_object)))
@@ -412,9 +412,7 @@ class Receiver(object):
             # send the data back to the receiving socket, from which it had
             # been received
             self.receiving_socket.setblocking(1)
-            associated_file = self.receiving_socket.makefile('w')
-            json.dump(data_back_to_receiver, associated_file)
-            associated_file.close()
+            json.dump(data_back_to_receiver, self._associated_file)
             self.receiving_socket.setblocking(0)
         else:
             # there had not been a receiving socket, but the data had been
@@ -503,6 +501,7 @@ class Forwarder(object):
                 forw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 remote_addr, remote_port = forward_to_addr.split(":")
                 forw_sock.connect((remote_addr, int(remote_port)))
+                self._associated_file = forw_sock.makefile('rw')
                 forw_sock.setblocking(0)
             except Exception as an_exc:    # generic Exception will be re-raised
                 sys.stderr.write("Error at line %d while forwarding to "
@@ -525,9 +524,7 @@ class Forwarder(object):
             sys.stderr.write("DEBUG: Before json.dumps to forwarding socket\n")
             try:
                 self.forwarding_socket.setblocking(1)
-                associated_file = self.forwarding_socket.makefile('w')
-                json.dump(data_to_forward, associated_file)
-                associated_file.close()
+                json.dump(data_to_forward, self._associated_file)
                 self.forwarding_socket.setblocking(0)
             except Exception as an_exc:    # generic Exception will be re-raised
                 sys.stderr.write("Error at line %d while sending data through "
@@ -546,9 +543,7 @@ class Forwarder(object):
             try:
                 self.forwarding_socket.setblocking(1)
                 sys.stderr.write("DEBUG: Loading json objt from forwarding socket\n")
-                associated_file = self.forwarding_socket.makefile('r')
-                data = json.load(associated_file)
-                associated_file.close()
+                data = json.load(self._associated_file)
                 sys.stderr.write("DEBUG: Setting forwarding sockt back to non-blocking\n")
                 self.forwarding_socket.setblocking(0)
             except Exception as an_exc:    # generic Exception will be re-raised
@@ -572,6 +567,7 @@ class Forwarder(object):
 
         if self.forwarding_socket is not None:
             try:
+                self._associated_file.close()
                 self.forwarding_socket.close()
             except Exception as an_exc:    # generic Exception will be re-raised
                 sys.stderr.write("Error at line %d while closing forwarding "
