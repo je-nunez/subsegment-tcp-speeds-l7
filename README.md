@@ -181,8 +181,9 @@ which takes its value from the kernel `jiffies` since the boot
 (`./<linux-kernel>/include/net/tcp.h`)).
 
 `ICMP` also has an option to request the Timestamp (ICMP type 13) and to reply it 
-(ICMP type 14). See, eg., `nmap` option `-PP` to send an ICMP Timestamp request:
+(ICMP type 14) (`RFC 1349`, section 5.1):
 
      https://tools.ietf.org/html/rfc1349#section-5.1
 
+See, eg., `nmap` option `-PP` to send an ICMP Timestamp request.
 
