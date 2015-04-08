@@ -187,3 +187,8 @@ which takes its value from the kernel `jiffies` since the boot
 
 See, eg., `nmap` option `-PP` to send an ICMP Timestamp request.
 
+A different approach is the `IP Flow Information Export` protocol, where the routers
+and switches send flow information outband (see `RFCs 7011 and 7015`). In Linux,
+the `conntrackd` daemon and the `conntrack` command-line program can do statistics
+gathering.
+
