@@ -155,19 +155,34 @@ Probably the most known are `ping`, `traceroute` (and similar, like `tcptracerou
 etc).
 
 The `TCP header` itself usually has a timestamp option (`RFC 1323`) which is used 
-for Round-Trip Time Measurement, as well as `IP header` may have one (`RFC 781`):
+for Round-Trip Time Measurement, as well as `IP header` may have several timestamps,
+as the utility in this project (`RFC 781` and `RFC 791`):
 
     Timestamp in header:
     
       TCP header:  https://tools.ietf.org/html/rfc1323#section-3
+      
       IP header:   https://tools.ietf.org/html/rfc781
+                   https://tools.ietf.org/html/rfc791 (chaining of several timestamps)
 
 The issue with these timestamps in the headers of the lower layers is that they 
 are not passed to user-mode applications, so to obtain it you need to use the 
-`libpcap` (or equivalent) library. (See, eg., in Linux:
+`libpcap` (or equivalent) library, and that their timestamp is not in epoch time
+-even under synchronization by NTP in the network, but the relative `uptime` of
+the host, so two hosts A and B won't have the same timestamps unless they were boot
+up at exactly the same time, and to solve this, two packets or more have to be
+transmitted between hosts A and B to find the deltas of the timestamps between those
+two packets. (See, eg., in Linux:
 				    
       /proc/sys/net/ipv4/tcp_timestamps
 				   
 and the use of this TCP timestamp in `./<linux-kernel>/net/ipv4/tcp_output.c`, 
-which takes its value from the kernel `jiffies` (`./<linux-kernel>/include/net/tcp.h`)).
+which takes its value from the kernel `jiffies` since the boot 
+(`./<linux-kernel>/include/net/tcp.h`)).
+
+`ICMP` also has an option to request the Timestamp (ICMP type 13) and to reply it 
+(ICMP type 14). See, eg., `nmap` option `-PP` to send an ICMP Timestamp request:
+
+     https://tools.ietf.org/html/rfc1349#section-5.1
+
 
