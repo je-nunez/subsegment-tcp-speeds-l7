@@ -162,9 +162,12 @@ for Round-Trip Time Measurement, as well as `IP header` may have one (`RFC 781`)
       TCP header:  https://tools.ietf.org/html/rfc1323#section-3
       IP header:   https://tools.ietf.org/html/rfc781
 
-The issue with these timestamps is that they are not passed to user-mode applications,
-so to obtain it you need to use the `libpcap` (or equivalent) library. (See, eg.,
-in Linux `/proc/sys/net/ipv4/tcp_timestamps` and the use of this timestamp in 
-`./<linux-kernel>/net/ipv4/tcp_output.c`, which takes its value from the kernel 
-`jiffies` (`./<linux-kernel>/include/net/tcp.h`)).
+The issue with these timestamps in the headers of the lower layers is that they 
+are not passed to user-mode applications, so to obtain it you need to use the 
+`libpcap` (or equivalent) library. (See, eg., in Linux:
+				    
+      /proc/sys/net/ipv4/tcp_timestamps
+				   
+and the use of this TCP timestamp in `./<linux-kernel>/net/ipv4/tcp_output.c`, 
+which takes its value from the kernel `jiffies` (`./<linux-kernel>/include/net/tcp.h`)).
 
