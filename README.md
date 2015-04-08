@@ -154,8 +154,8 @@ the case of dynamic, or self-organizing, networks.
 Probably the most known are `ping`, `traceroute` (and similar, like `tcptraceroute`,
 etc).
 
-The TCP header itself usually has a timestamp option (RFC 1323) which is used for
-Round-Trip Time Measurement, as well as IP header may have one:
+The `TCP header` itself usually has a timestamp option (`RFC 1323`) which is used 
+for Round-Trip Time Measurement, as well as `IP header` may have one (`RFC 781`):
 
     Timestamp in header:
     
