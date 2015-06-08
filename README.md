@@ -4,6 +4,17 @@
 
 This project is a *work in progress*. The implementation is *incomplete* and subject to change. The documentation can be inaccurate.
 
+# Requeriments
+
+You need to install the Python `Tornado` module:
+
+     pip install tornado
+
+or
+
+     easy_install tornado
+
+
 # Current state
 
 The old version was substituted by a new one based on the Tornado framework (with basic `TCPServer`s and `IOStream`s) since it has less issues with concurrency. The old version is still available here.
