@@ -6,7 +6,7 @@ This project is a *work in progress*. The implementation is *incomplete* and sub
 
 # Current state
 
-The old version was substituted by a new one based on the Tornado framework (with basic TCPServers and IOStreams) since it has less issues with concurrency. The old version is still available here.
+The old version was substituted by a new one based on the Tornado framework (with basic `TCPServer`s and `IOStream`s) since it has less issues with concurrency. The old version is still available here.
 
 # Description
 
