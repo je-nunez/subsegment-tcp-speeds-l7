@@ -40,12 +40,61 @@ class tornado.tcpserver.TCPServer(io_loop=None, ...)
 MY_HOST_DOMAIN_NAME = ""
 
 
-class EstablishedListener(object):
+class Base_AnnotatedConnection(object):
+    """ This is the base class that represents an annotated connection,
+    ie., an established TCP connection which has a field which represents
+    the annotation this established connection adds, tracks, and analyzes
+    inside the TCP connection
+
+    Fields:
+        _initial_annotation_key
+                 the initial annotation key for when the packet first
+                 enters this hop
+
+        _final_annotation_key
+                 the final annotation key (when the return, answer packet
+                 exits this network hop
+
+
+    Methods:
+        self.__init__(string1, string2)
+                     constructor. Builds the above two fields of the
+                     annotation keys from the parameters string1 and
+                     string2
+    """
+
+    def __init__(self, string1, string2):
+        # first, clear the chactacters in both string[12]
+        tmp_string1 = re.sub(r"[^a-zA-Z0-9]", "_", string1)
+        tmp_string2 = re.sub(r"[^a-zA-Z0-9]", "_", string2)
+
+        # build the initial annotation key (when the packet first enters
+        # this network hop)
+        my_salt = random.randint(0, 10000000)
+        annotation_fieldname_uuid = "X_My_Annotation_%s_%s_%d" % \
+              (tmp_string1, tmp_string2, my_salt)
+        # TODO: this UUID of the annotation should be MD5-ed to obscure it
+        # for security (like with hashlib.md5())
+        self._initial_annotation_key = annotation_fieldname_uuid
+
+
+        # build the final annotation key (when the return, answer packet
+        # exits this network hop)
+        annotation_fieldname_uuid = "Delay between %s and %s" % \
+                                    (tmp_string1, tmp_string2)
+        self._final_annotation_key = annotation_fieldname_uuid
+
+
+
+
+class EstablishedListener(Base_AnnotatedConnection):
     """
         Per-connection object.
     """
 
     def __init__(self, stream, client_addr, local_addr, forwarding_dest):
+        Base_AnnotatedConnection.__init__(self, client_addr, local_addr)
+
         self.client_stream = stream
         stream.set_close_callback(self.on_disconnect)
         stream.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -56,19 +105,6 @@ class EstablishedListener(object):
         self.forwarding_destination = forwarding_dest # where to forward to
         self.forw_stream = None         # the stream connected to forward to
 
-        # generate a unique UUID with which to annotate the lines in this
-        # connection with the timestamps (ie., this is the annotation cookie)
-        my_field_listen_addr = re.sub(r"[^a-zA-Z0-9]", "_", local_addr)
-        my_field_client_addr = re.sub(r"[^a-zA-Z0-9]", "_", client_addr)
-
-        my_salt = random.randint(0, 10000000)
-        json_tstamp_fieldname_uuid = "X_My_Annotation_%s_%s_%d" % \
-                                   (my_field_listen_addr, my_field_client_addr,
-                                    my_salt)
-        # TODO: this UUID of the annotation should be MD5-ed to obscure it
-        # for security (like with hashlib.md5())
-        self.json_annotation_fieldname_uuid = json_tstamp_fieldname_uuid
-
 
     @tornado.gen.coroutine
     def on_disconnect(self):
@@ -76,6 +112,7 @@ class EstablishedListener(object):
         yield []
         self.log("on_disconnect done")
         return
+
 
     @tornado.gen.coroutine
     def handle_listening_at_client(self):
@@ -141,7 +178,7 @@ class EstablishedListener(object):
             object_read['line'] = str(data)
 
         epoch_in_millis = str(int(time.time() * 1000))
-        object_read[self.json_annotation_fieldname_uuid] = epoch_in_millis
+        object_read[self._initial_annotation_key] = epoch_in_millis
         json_annotated_object = tornado.escape.json_encode(object_read)
 
         if self.forw_stream:
@@ -177,13 +214,16 @@ class EstablishedListener(object):
         # find our original annotation, that we put in the JSON object
         # before sending it to the next forwarding proxy, back in the
         # returned JSON object from the next forwarding proxy
-        if self.json_annotation_fieldname_uuid in object_read:
-            original_time = object_read[self.json_annotation_fieldname_uuid]
+        if self._initial_annotation_key in object_read:
+            original_time = object_read[self._initial_annotation_key]
             original_time = int(original_time)
             curr_epoch_in_millis = int(time.time() * 1000)
             delay_in_millis = str(curr_epoch_in_millis - original_time)
-           # rewrite the timestamp of our original annotation with the delay
-            object_read[self.json_annotation_fieldname_uuid] = delay_in_millis
+            # the answering packet is doing its return trip, so delete the
+            # old annotation key and annotate the packet with final key
+            del object_read[self._initial_annotation_key]
+            object_read[self._final_annotation_key] = delay_in_millis
+
 
         json_annotated_object = tornado.escape.json_encode(object_read)
 
@@ -228,12 +268,14 @@ class ListeningServer(tornado.tcpserver.TCPServer):
 
 
 
-class ForwardingClient(object):
+class StdInputForwardingClient(Base_AnnotatedConnection):
     """ This is an independent forwarding client, when there is no listener
         server, ie., when we listen (read) to standard-input and forward in TCP
     """
 
     def __init__(self, forwarding_destination):
+        Base_AnnotatedConnection.__init__(self, "stdin", forwarding_destination)
+
         remote_addr, remote_port = forwarding_destination.split(":")
         self.forwarding_addr = remote_addr
         self.forwarding_port = int(remote_port)
@@ -246,6 +288,7 @@ class ForwardingClient(object):
         self.forw_stream = tornado.iostream.IOStream(s)
         self.forw_stream.connect((self.forwarding_addr, self.forwarding_port),
                                 self.send_request)
+
 
     @tornado.gen.coroutine
     def send_request(self):
