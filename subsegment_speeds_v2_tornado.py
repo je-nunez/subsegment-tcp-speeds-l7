@@ -4,6 +4,105 @@
 #     https://pypi.python.org/pypi/quickproxy/0.2.0
 # that is a Tornado HTTPproxy in the PyPi repo (but this script is a TCP proxy)
 #
+
+"""Program for helping to isolate which sub-segment in a network [or proxy host
+in a network] influences more in the delay of a network transmission.
+
+Formally, it works as chain of network proxies with send measure headers among
+each proxy in the chain.
+
+Invocation:
+
+     subsegment-speeds.py  [-{l|-listen} <listen-addr>]
+                           [-{f|-forward_to} <forward_to-address>]
+                           [-{t|-timeout} <timeout>]
+                           [-{r|-remove-perf-headers}]
+
+     Command-line arguments:
+
+          -{t|-timeout} <timeout>:       specify the timeout for each operation
+                                         (default: 10 seconds)
+
+
+          -{l|-listen} <listen-addr>:    which TCP address:port to listen for
+                                         incoming packets. (default: none)
+
+                                        If this option -{l|-listen} is not used,
+                                        the program will read from the
+                                        standard-input as fast as possible,
+                                        inserting performance-headers every
+                                        -{b|-block} bytes of read-data; the
+                                        answered-data, in turn, will be printed
+                                        to std-output.
+
+
+          -{f|-forward_to} <forward_to-address>:       to which TCP address:port
+                                                       to forward the input data
+                                                       (default: none)
+
+                                        The input data forwarded is the one read
+                                        either by the -{l|-listen} address, or
+                                        by standard-input if the -{l|-listen}
+                                        address is omitted.
+
+                                        If -{f|-forward_to} is omitted, then
+                                        there will be no forwarding, and this
+                                        command invocation will echo-back to the
+                                        -{l|-listen} address whatever it
+                                        receives from it.
+
+
+          -{r|-remove-perf-headers}:     Whether to add or not the performance
+                                         headers belonging to this hop in the
+                                         packets (default: add them)
+
+
+Example:
+
+      This is an example with four hosts making up the chain of communication
+      sub-segments in the network, the client A works with (connects to) B, B to
+      C, and C to Z.
+
+      B can be in another co-location or geographically remote in comparison to
+      A, or be an entry point with heavy-load to another network, etc. The same
+      applies with C in comparison to B, it can be in another co-location or
+      geographically remote in comparison to C, etc; and so on in this
+      delay-sensitive computer network.
+
+           source host A:
+
+                    subsegment-tcp-speeds.py  --forward_to  <host-B>:9000
+
+                        In this case, A forwards its standard-input to the proxy
+                        at B, and gets its answer (and time-delay stats) from B.
+
+           intermediate host B:
+
+                    subsegment-tcp-speeds.py  --listen  '*:9000'
+                                              --forward_to  <host-C>:9000
+
+                        In this case, B forwards its standard-input to the proxy
+                        at C, and gets its answer (and time-delay stats) from C.
+
+           intermediate host C:
+
+                    subsegment-tcp-speeds.py  --listen  '*:9000'
+                                              --forward_to  <host-Z>:9000
+
+                        In this case, C forwards its standard-input to the proxy
+                        at Z, and gets its answer (and time-delay stats) from Z.
+
+           end host Z:
+
+                    subsegment-tcp-speeds.py  --listen  '*:9000'
+
+                        In this case, Z doesn't use a --forward_to option, so it
+                        is the end backend which resolves client A's initial
+                        request. This script simply echoes back the initial
+                        request, so it sends back A's standard-input back to A
+                        (and time-delay stats)."""
+
+
 import sys
 import os
 import argparse
@@ -23,24 +122,8 @@ import tornado.escape
 import tornado.tcpclient
 import tornado.tcpserver
 
-"""
-class tornado.tcpclient.TCPClient(resolver=None)
-      A non-blocking TCP connection factory.
 
-      connect(*args, **kwargs)
-      Connect to the given host and port.
-
-      Asynchronously returns an IOStream
-
-
-class tornado.tcpserver.TCPServer(io_loop=None, ...)
-"""
-
-# The hostname of this proxy
-MY_HOST_DOMAIN_NAME = ""
-
-
-class Base_AnnotatedConnection(object):
+class BaseAnnotatedConnection(object):
     """ This is the base class that represents an annotated connection,
     ie., an established TCP connection which has a field which represents
     the annotation this established connection adds, tracks, and analyzes
@@ -87,13 +170,13 @@ class Base_AnnotatedConnection(object):
 
 
 
-class EstablishedListener(Base_AnnotatedConnection):
+class EstablishedListener(BaseAnnotatedConnection):
     """
         Per-connection object.
     """
 
     def __init__(self, stream, client_addr, local_addr, forwarding_dest):
-        Base_AnnotatedConnection.__init__(self, client_addr, local_addr)
+        BaseAnnotatedConnection.__init__(self, client_addr, local_addr)
 
         self.client_stream = stream
         stream.set_close_callback(self.on_disconnect)
@@ -108,6 +191,7 @@ class EstablishedListener(Base_AnnotatedConnection):
 
     @tornado.gen.coroutine
     def on_disconnect(self):
+        """The remote client has desconnected from this listener."""
         self.log("on_disconnect")
         yield []
         self.log("on_disconnect done")
@@ -116,6 +200,8 @@ class EstablishedListener(Base_AnnotatedConnection):
 
     @tornado.gen.coroutine
     def handle_listening_at_client(self):
+        """A remote client has connected from this listener
+        so we need to read an input line from it."""
         try:
             self._read_line_from_client()
         except tornado.iostream.StreamClosedError:
@@ -125,39 +211,55 @@ class EstablishedListener(Base_AnnotatedConnection):
 
     @tornado.gen.coroutine
     def on_connect(self):
+        """A remote client has connected to this listener,
+        so we prepare to read a line from it and, at the same time,
+        if there is a forwarding proxy to which we must send the
+        input lines to, we open that forwarding socket/stream to it."""
         self.log("on_connect")
         yield self.handle_listening_at_client()
         if self.forwarding_destination:
            # we need to forward first to another proxy, instead of answering
            # our client directly
             self.log("connecting to next forwarding proxy in the chain")
-            forwarding_addr, forwarding_port = self.forwarding_destination.split(":")
-            forwarding_port = int(forwarding_port)
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-            self.forw_stream = tornado.iostream.IOStream(s)
-            self.forw_stream.connect((forwarding_addr, forwarding_port))
+            forward_addr, forward_port = self.forwarding_destination.split(":")
+            forward_port = int(forward_port)
+            forw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+            self.forw_stream = tornado.iostream.IOStream(forw_socket)
+            self.forw_stream.connect((forward_addr, forward_port))
 
         return
 
 
 
     def log(self, msg, *args, **kwargs):
+        """Log."""
         print "[{}]: {}".format(self.client_addr, msg.format(*args, **kwargs))
         return
 
 
     @tornado.gen.coroutine
     def _read_line_from_client(self):
+        """Read a line from the remote client, which doesn't have our
+        annotations yet (it is the first time this line is seen by us)."""
+
         self.client_stream.read_until('\n', self._handle_read_from_client)
 
 
     @tornado.gen.coroutine
     def _read_line_back_from_forwarder(self):
-        self.forw_stream.read_until('\n', self._handle_read_back_from_forwarder)
+        """Read a line which the forwarding proxy has answered back to us.
+        So this line has already passed through us, so it was then annotated
+        by us."""
+
+        self.forw_stream.read_until('\n', self._handle_read_back_from_forwrdr)
 
 
     @tornado.gen.coroutine
     def _handle_read_from_client(self, data):
+        """Handle a line read from the remote client, in order to add to it
+        our annotations (this line is the first time is seen, so it doesn't
+        have our annotations)."""
+
         self.log("received line from client {}", repr(data))
         data = data.rstrip('\r\n')        # remove the ending new-line
         # encode the JSON object with the annotation of the timestamp in this
@@ -194,7 +296,11 @@ class EstablishedListener(Base_AnnotatedConnection):
 
 
     @tornado.gen.coroutine
-    def _handle_read_back_from_forwarder(self, data):
+    def _handle_read_back_from_forwrdr(self, data):
+        """Handle a line answered back from the next hop we had forwarded to,
+        in order to update our annotations we had put in this line before
+        sending it to that forwarding proxy."""
+
         self.log("received line back from forwader {}", repr(data))
         data = data.rstrip('\r\n')        # remove the ending new-line
         try:
@@ -243,19 +349,29 @@ class ListeningServer(tornado.tcpserver.TCPServer):
 
 
     def listen(self, port, address=""):
+        """ Listen at this address, and prepare what is our address
+        to insert it as a JSON key when we annotate the incoming lines"""
+
         tornado.tcpserver.TCPServer.listen(self, port, address="")
         if address:
             self._local_address = "%s:%d" % (address, port)
         else:
-            self._local_address = "%s:%d" % (MY_HOST_DOMAIN_NAME, port)
+            my_host_fqdn = socket.getfqdn()
+            # Take all the DNS non letters or digits characters and
+            # transform them into "_"
+            my_host_fqdn = re.sub(r"[^a-zA-Z0-9]", "_", my_host_fqdn)
+
+            self._local_address = "%s:%d" % (my_host_fqdn, port)
 
 
     @tornado.gen.coroutine
     def handle_stream(self, stream, clnt_address):
+        """ We have received a new incoming connection from a remote client.
+        Create a new established-connection object to handle it."""
 
         client_address = "%s:%d" % (clnt_address[0], clnt_address[1])
         sys.stderr.write("DEBUG: Creating a new connection from %s\n" %
-                          client_address)
+                         client_address)
 
         conn = EstablishedListener(stream, client_address, self._local_address,
                                    self._forwarding_destination)
@@ -268,13 +384,13 @@ class ListeningServer(tornado.tcpserver.TCPServer):
 
 
 
-class StdInputForwardingClient(Base_AnnotatedConnection):
+class StdInputForwardingClient(BaseAnnotatedConnection):
     """ This is an independent forwarding client, when there is no listener
         server, ie., when we listen (read) to standard-input and forward in TCP
     """
 
     def __init__(self, forwarding_destination):
-        Base_AnnotatedConnection.__init__(self, "stdin", forwarding_destination)
+        BaseAnnotatedConnection.__init__(self, "stdin", forwarding_destination)
 
         remote_addr, remote_port = forwarding_destination.split(":")
         self.forwarding_addr = remote_addr
@@ -284,14 +400,19 @@ class StdInputForwardingClient(Base_AnnotatedConnection):
 
     @tornado.gen.coroutine
     def connect(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-        self.forw_stream = tornado.iostream.IOStream(s)
+        """ Connect to the remote forwarding server. """
+
+        forw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+        self.forw_stream = tornado.iostream.IOStream(forw_socket)
         self.forw_stream.connect((self.forwarding_addr, self.forwarding_port),
-                                self.send_request)
+                                 self.send_request)
 
 
     @tornado.gen.coroutine
     def send_request(self):
+        """ Annotate a line and pass it to our connection to the forwarding
+        server. """
+
         # TODO: to be defined
         pass
 
@@ -332,15 +453,17 @@ def run_listener(listen_port, forwarding_dest=None,
 
 
 
-def on_read_from_stdin(fd, events):
+def cb_on_read_from_stdin(fd_to_read, events):
+    """ Standard-input has a line ready to be be read. """
+
     if events != tornado.ioloop.IOLoop.READ:
         ioloop = tornado.ioloop.IOLoop.instance()
         ioloop.remove_handler(0)
         ioloop.add_callback(lambda x: x.stop(), ioloop)
     else:
-        buffer = sys.stdin.read(1024)
-        if buffer:
-            sys.stderr.write("READ %s" % buffer)
+        stdin_buff = sys.stdin.read(1024)
+        if stdin_buff:
+            sys.stderr.write("READ %s" % stdin_buff)
         else:
             # sys.stderr.write("EOF found on stdin\n")
             ioloop = tornado.ioloop.IOLoop.instance()
@@ -350,9 +473,10 @@ def on_read_from_stdin(fd, events):
 
 def run_forwarder(forward_to_addr,
                   debug_level=0):
+    """ Run the forwarder from standard-input to a remote proxy. """
 
     ioloop = tornado.ioloop.IOLoop.instance()
-    ioloop.add_handler(0, on_read_from_stdin, ioloop.READ|ioloop.ERROR)
+    ioloop.add_handler(0, cb_on_read_from_stdin, ioloop.READ|ioloop.ERROR)
     ioloop.start()
 
 
@@ -366,12 +490,6 @@ def main():
     listen_port = None
     forward_to_addr = None
     remove_perf_headers = False
-
-    global MY_HOST_DOMAIN_NAME
-    MY_HOST_DOMAIN_NAME = socket.getfqdn()
-    # Take all the DNS non letters or digits characters and
-    # transform them into "_"
-    MY_HOST_DOMAIN_NAME = re.sub(r"[^a-zA-Z0-9]", "_", MY_HOST_DOMAIN_NAME)
 
     # Get the usage string from the doc-string of this script
     # (ie. usage_string := doc_string )
@@ -403,9 +521,9 @@ def main():
     parser.add_argument('-r', '--remove_perf_headers',
                         default=False, required=False,
                         action='store_true',
-                        help='Whether to remove or not existing '
-                             'performance headers in a packet '
-                             '(default: %(default)s)')
+                        help='Whether to add or not the performance headers '
+                             'belonging to this hop in the packets '
+                             '(default: add them)')
 
     args = parser.parse_args()
 
@@ -419,10 +537,10 @@ def main():
         remove_perf_headers = True
 
     if listen_port:
-        print ("Starting TCP proxy on port %s" % listen_port)
+        print "Starting TCP proxy on port %s" % listen_port
         run_listener(listen_port, forward_to_addr)
     elif forward_to_addr:
-        print ("Starting TCP forwarder to destination %s" % forward_to_addr)
+        print "Starting TCP forwarder to destination %s" % forward_to_addr
         run_forwarder(forward_to_addr)
 
 
