@@ -52,7 +52,7 @@ Formally, it works as chain of network proxies with send measure headers among e
 
      Invocation:
      
-          subsegment_tcp_speeds.py  [-{t|-timeout} <timeout>]  [-{l|-listen} <listen-addr>]  [-{f|-forward-to} <forward-to-address>]  -{s|-stdin-block-size} <std-in-block-size>   [-{r|-remove-perf-headers}]
+          subsegment_tcp_speeds.py  [-{t|-timeout} <timeout>]  [-{l|-listen} <listen-addr>]  [-{f|-forward-to} <forward-to-address>]  [-{r|-remove-perf-headers}]
      
      Command-line arguments:
      
@@ -68,7 +68,7 @@ Formally, it works as chain of network proxies with send measure headers among e
                                         the answered-data, in turn, will be printed to stardard-output.
      
      
-          -{f|-forward-to} <forward-to-address>:         to which TCP address:port to forward the
+          -{f|-forward_to} <forward-to-address>:         to which TCP address:port to forward the
                                                          input data (default: none)
                                         The input data forwarded is the one read either by the 
                                         -{l|-listen} address, or by standard-input if the 
@@ -77,17 +77,6 @@ Formally, it works as chain of network proxies with send measure headers among e
                                         If -{f|-forward-to} is omitted, then there will be no 
                                         forwarding, and this command invocation will echo-back to the 
                                         -{l|-listen} address whatever it receives from it.
-     
-     
-          -{s|-stdin-block-size} <std-in-block-size>:    Standard-input block size in bytes 
-                                                         (default: 512)
-
-                                        If -{l|-listen} is not used, the program will read from 
-                                        standard-input using the block-size indicated here. These 
-                                        blocks so read are the ones that are then forwarded from 
-                                        this program to the next subsegment in the network (if
-                                        there is one), or to stdout (if there are no -{f|-forward-to}
-                                        address).
      
      
           -{r|-remove-perf-headers}:     whether to remove or not existing performance headers in a 
