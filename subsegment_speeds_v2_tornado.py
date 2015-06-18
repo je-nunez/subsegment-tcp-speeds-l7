@@ -404,8 +404,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         forw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         self.forw_stream = tornado.iostream.IOStream(forw_socket)
-        self.forw_stream.connect((self.forwarding_addr, self.forwarding_port),
-                                 self.send_request)
+        self.forw_stream.connect((self.forwarding_addr, self.forwarding_port))
 
 
     @tornado.gen.coroutine
