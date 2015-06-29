@@ -284,12 +284,15 @@ class EstablishedListener(BaseAnnotatedConnection):
         json_annotated_object = tornado.escape.json_encode(object_read)
 
         if self.forw_stream:
-            self.log("forwarding line to next proxy {}", repr(data))
+            self.log("forwarding JSON to next proxy {}",
+                     repr(json_annotated_object))
             yield self.forw_stream.write("%s\n" % json_annotated_object)
             self._read_line_back_from_forwarder()  # we just sent a line to fwd
         else:
            # we have no other forwarding proxy to send the data, so simply
            # answer directly to our client
+            self.log("answering JSON back to client {}",
+                     repr(json_annotated_object))
             yield self.client_stream.write("%s\n" % json_annotated_object)
         self._read_line_from_client()
 
@@ -396,6 +399,66 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         self.forwarding_addr = remote_addr
         self.forwarding_port = int(remote_port)
         self.forw_stream = None
+        # convert sys.stdin to a Tornado IOStream
+        self.stdin = tornado.iostream.PipeIOStream(sys.stdin.fileno())
+        self.stdout = tornado.iostream.PipeIOStream(sys.stdout.fileno())
+
+
+    @tornado.gen.coroutine
+    def read_first_line_from_std_input(self):
+        """Read the first line from the standard input."""
+        self._read_line_from_std_input()
+
+
+    @tornado.gen.coroutine
+    def _read_line_from_std_input(self):
+        """Read a line from the standard input, which doesn't have our
+        annotations yet."""
+
+        self.stdin.read_until('\n', self._handle_read_from_std_input)
+
+
+
+    @tornado.gen.coroutine
+    def _read_line_back_from_forwarder(self):
+        """Read a line which the forwarding proxy has answered back to us.
+        So this line has already passed through us, so it was then annotated
+        by us."""
+
+        self.forw_stream.read_until('\n', self._handle_read_back_from_forwrdr)
+
+
+    @tornado.gen.coroutine
+    def _handle_read_from_std_input(self, data):
+        """ Standard-input has a line ready to be be read.
+            Send this line to the next forwarder proxy, connecting before to it
+            if necessary.
+        """
+
+        self.log("received line from standard-input {}", repr(data))
+
+        data = data.rstrip('\r\n')        # remove the ending new-line
+        # encode the JSON object with the annotation of the timestamp in this
+        # proxy.
+        dict_repr = {}
+        dict_repr['line'] = str(data)
+
+        epoch_in_millis = str(int(time.time() * 1000))
+        dict_repr[self._initial_annotation_key] = epoch_in_millis
+        json_annotated_object = tornado.escape.json_encode(dict_repr)
+
+        if not self.forw_stream:
+            self.log("connecting to fwd-ing proxy {}:{}",
+                     self.forwarding_addr, self.forwarding_port
+                    )
+            self.connect()
+
+        self.log("forwarding JSON to next proxy {}",
+                 repr(json_annotated_object))
+        yield self.forw_stream.write("%s\n" % json_annotated_object)
+        yield self._read_line_back_from_forwarder()  # just sent a line to fwd
+        # yield self._read_line_from_std_input()
+
 
 
     @tornado.gen.coroutine
@@ -408,12 +471,64 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
 
     @tornado.gen.coroutine
-    def send_request(self):
-        """ Annotate a line and pass it to our connection to the forwarding
-        server. """
+    def _handle_read_back_from_forwrdr(self, data):
+        """Handle a line answered back from the next hop we had forwarded to,
+        in order to update our annotations we had put in this line before
+        sending it to that forwarding proxy.
+        Then print results in our standard-output, since we had read initially
+        from standard-input
+        """
 
-        # TODO: to be defined
-        pass
+        self.log("received line back from forwarder {}", repr(data))
+        data = data.rstrip('\r\n')        # remove the ending new-line
+        try:
+            object_read = tornado.escape.json_decode(str(data))
+            # we expect that the JSON object decoded was a complex object
+            # (like a Python Dictionary), not an elementary one (like an 'int')
+            # If it was an elementary one, then we convert it to a dictionary
+            if not isinstance(object_read, dict):
+                object_read = {}
+                object_read['line'] = str(data)
+        except ValueError:
+            # the data was raw-data, like a 'string', so it couldn't be JSON
+            # decoded
+            object_read = {}
+            object_read['line'] = str(data)
+
+        # find our original annotation, that we put in the JSON object
+        # before sending it to the next forwarding proxy, back in the
+        # returned JSON object from the next forwarding proxy
+        if self._initial_annotation_key in object_read:
+            original_time = object_read[self._initial_annotation_key]
+            original_time = int(original_time)
+            curr_epoch_in_millis = int(time.time() * 1000)
+            delay_in_millis = str(curr_epoch_in_millis - original_time)
+            # the answering packet is doing its return trip, so delete the
+            # old annotation key and annotate the packet with final key
+            del object_read[self._initial_annotation_key]
+            object_read[self._final_annotation_key] = delay_in_millis
+
+        # dump the annotations received from the network loop to std-out
+        for key in object_read:
+            if key != 'line':
+                yield self.stdout.write("%s = %s\n" % \
+                                  (str(key), str(object_read[key])))
+
+        # Write the original line back to the std-out (an echo of origina;
+        # line)
+        if 'line' in object_read:
+            yield self.stdout.write("Line %s\n" % str(object_read['line']))
+
+        yield self._read_line_from_std_input()
+        # yield self._read_line_back_from_forwarder()
+
+
+
+    def log(self, msg, *args, **kwargs):
+        """Log."""
+        print "[{}:{}]: {}".format(self.forwarding_addr, self.forwarding_port,
+                                   msg.format(*args, **kwargs))
+        return
 
 
 
@@ -452,31 +567,15 @@ def run_listener(listen_port, forwarding_dest=None,
 
 
 
-def cb_on_read_from_stdin(fd_to_read, events):
-    """ Standard-input has a line ready to be be read. """
-
-    if events != tornado.ioloop.IOLoop.READ:
-        ioloop = tornado.ioloop.IOLoop.instance()
-        ioloop.remove_handler(0)
-        ioloop.add_callback(lambda x: x.stop(), ioloop)
-    else:
-        stdin_buff = sys.stdin.read(1024)
-        if stdin_buff:
-            sys.stderr.write("READ %s" % stdin_buff)
-        else:
-            # sys.stderr.write("EOF found on stdin\n")
-            ioloop = tornado.ioloop.IOLoop.instance()
-            ioloop.remove_handler(0)
-            ioloop.add_callback(lambda x: x.stop(), ioloop)
-
-
 def run_forwarder(forward_to_addr,
                   debug_level=0):
     """ Run the forwarder from standard-input to a remote proxy. """
 
+    stdin_readr = StdInputForwardingClient(forward_to_addr)
     ioloop = tornado.ioloop.IOLoop.instance()
-    ioloop.add_handler(0, cb_on_read_from_stdin, ioloop.READ|ioloop.ERROR)
+    stdin_readr.read_first_line_from_std_input()
     ioloop.start()
+
 
 
 #### MAIN #####
@@ -485,7 +584,6 @@ def main():
     """Main() entry-point to this script."""
 
     timeout = 10
-    stdinp_block_size = 512
     listen_port = None
     forward_to_addr = None
     remove_perf_headers = False
