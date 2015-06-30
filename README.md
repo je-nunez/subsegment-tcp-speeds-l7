@@ -54,13 +54,12 @@ Formally, it works as chain of network proxies with send measure headers among e
 
           subsegment_tcp_speeds.py   [-{l|-listen} <listen-addr>]
                                      [-{f|-forward_to} <forward_to-address>]
-                                     [-{t|-timeout} <timeout>]
+                                     [-{d|-debug} <debug-level>]
                                      [-{r|-remove-perf-headers}]
 
      Command-line arguments:
 
-          -{t|-timeout} <timeout>:       specify the timeout for each operation
-                                         (default: 10 seconds)
+          -{d|-debug} <debug-level>:     debug level (0: emerg ... 7: debug)
 
 
           -{l|-listen} <listen-addr>:    which TCP address:port to listen for
@@ -91,10 +90,9 @@ Formally, it works as chain of network proxies with send measure headers among e
                                         receives from it.
 
 
-          -{r|-remove-perf-headers}:     Whether to add or not the performance
+          -{n|-dont-add-perf-headers}:     Whether to add or not the performance
                                          headers belonging to this hop in the
                                          packets (default: add them)
-
 
 
 # Example:
