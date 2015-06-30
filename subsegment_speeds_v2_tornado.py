@@ -7,7 +7,6 @@
 # pylint: disable=too-many-arguments
 # pylint: disable=too-few-public-methods
 
-
 """Program for helping to isolate which sub-segment in a network [or proxy host
 in a network] influences more in the delay of a network transmission.
 
@@ -105,6 +104,30 @@ Example:
                         (and time-delay stats)."""
 
 
+# The difference of this script is that it works in ISO/OSI layer 7: traceroute,
+# tcptraceroute, pathchar, pchar, and similar programs, work at the IP layer 3
+# or at the TCP layer 4, so this script is more similar to a layered structure
+# of proxies like Varnish, HAProxy, Nginx, PHP-FPM (or F5 BigIP iRules if you
+# want) interconnected with one another, so what this script does is that each
+# layer inserts its own OSI layer-7 annotations into the packets it proxies, and
+# then process them back when the return packet is answered. This is similar in
+# idea with HAProxy's or Squid's HTTP header insertion, although this proxy
+# works with TCP, not strictly HTTP.
+#
+#    haproxy.cfg:
+#            ...
+#        http-request add-header "X-my-http-header-timeStamp-at-Proxy"  "%ms"
+#        # (or better:
+#        http-request add-header "X-my-http-header-timeStamp-at-Proxy"  "%f %ms"
+#
+#  Or Squid in a reverse-proxy config with:
+#
+#    squid.conf:
+#            ...
+#        request_header_add  X-my-http-header-timeStamp-at-Proxy  "%tS"
+#
+
+
 import sys
 import os
 import argparse
@@ -139,6 +162,11 @@ import tornado.tcpserver
 #    Alert     =  1
 #    Emergency =  0
 
+
+
+#
+# class BaseAnnotatedConnection(object):
+#
 
 class BaseAnnotatedConnection(object):
     """ This is the base class that represents an annotated connection,
@@ -213,6 +241,10 @@ class BaseAnnotatedConnection(object):
 
 
 
+#
+# class EstablishedListener(BaseAnnotatedConnection):
+#
+
 class EstablishedListener(BaseAnnotatedConnection):
     """
         Object to represent an incoming connection to us (and the corresponding
@@ -236,7 +268,7 @@ class EstablishedListener(BaseAnnotatedConnection):
                                          log_verbosity, client_addr)
 
         self.client_stream = stream
-        stream.set_close_callback(self.on_disconnect)
+        stream.set_close_callback(self.on_incoming_client_disconnect)
         stream.set_nodelay(True)            # TCP_NODELAY option
         stream.socket.setsockopt(socket.IPPROTO_TCP, socket.SO_KEEPALIVE, 1)
 
@@ -248,14 +280,25 @@ class EstablishedListener(BaseAnnotatedConnection):
 
 
     @tornado.gen.coroutine
-    def on_connect(self):
-        """A remote client has connected to this listener, so we prepare
-        to read a line from it and, at the same time, if there is a
-        forwarding proxy to which we must send the input lines to, we open
-        now that forwarding socket/stream to it."""
-        self.log(7, "on_connect")
+    def prepare_incoming_connection(self):
+        """This is the first method called in an object of this class after it
+        was created. It doesn't belong to the object constructor above because
+        it is a co-routine, so it allows that an incoming line from the client
+        be read while this co-routine tries to set-up the forwarding connection
+        to the next proxy down the loop (if any).
+
+        So the story at this point is that a remote client has just connected
+        to this object, so we prepare to read a line from it and, concurrently,
+        we don't lose time and, if there is a forwarding proxy to which we
+        must send the input lines to, we open now that forwarding
+        socket/stream to it."""
+
+        self.log(7, "prepare_incoming_connection")
+
+        # handle this incoming connection
         yield self.handle_new_incoming_connection()
-        if self.forwarding_destination:
+
+        if self.forwarding_destination and not self.forw_stream:
             # we need to forward first to another proxy, instead of answering
             # our client directly
             self.log(6, "connecting to next forwarding proxy in the chain {}",
@@ -265,7 +308,10 @@ class EstablishedListener(BaseAnnotatedConnection):
             forw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
             self.forw_stream = tornado.iostream.IOStream(forw_socket)
             self.forw_stream.connect((forward_addr, forward_port))
+            self.forw_stream.set_close_callback(self.on_forwarder_disconnect)
             self.forw_stream.set_nodelay(True)  # TCP_NODELAY option
+            self.forw_stream.socket.setsockopt(socket.IPPROTO_TCP,
+                                               socket.SO_KEEPALIVE, 1)
 
         return
 
@@ -278,17 +324,44 @@ class EstablishedListener(BaseAnnotatedConnection):
         try:
             self._read_line_from_client()
         except tornado.iostream.StreamClosedError:
-            pass
+            pass  # see callback on_incoming_client_disconnect() below
         return
 
 
 
     @tornado.gen.coroutine
-    def on_disconnect(self):
+    def on_incoming_client_disconnect(self):
         """The incoming client has desconnected from this listener."""
         self.log(7, "on_disconnect incoming client")
         yield []
-        self.log(6, "incoming client has disconnected")
+
+        if self.forw_stream and not self.forw_stream.closed():
+            # if we also have a connection to an upstream, forwarding proxy
+            # that is still open, then close it as well
+            self.forw_stream.close()
+
+        self.log(5, "incoming client has disconnected")
+        return
+
+
+
+    @tornado.gen.coroutine
+    def on_forwarder_disconnect(self):
+        """The forwarder has disconnected from us."""
+        self.log(7, "on_forwarder_disconnect")
+
+        # TODO: should a new connection tried to be re-opened to the upstream?
+        # ie, to the forwarding proxy? If so, how many times to attempt
+        # reconnecting?
+
+        yield []
+
+        if self.client_stream and not self.client_stream.closed():
+            # if we also have the incoming downstream client connection that is
+            # still open, then close it as well
+            self.client_stream.close()
+
+        self.log(3, "forwarding-proxy has disconnected from us")
         return
 
 
@@ -311,8 +384,9 @@ class EstablishedListener(BaseAnnotatedConnection):
         self.forw_stream.read_until('\n', self._handle_read_back_from_forwrdr)
 
 
+
     @tornado.gen.coroutine
-    def _handle_read_from_client(self, data):
+    def _handle_read_from_client(self, in_line_from_client):
         """Handle a line read from the incoming client, in order to add to it
         our perf annotations (this line is the first time is seen, so it doesn't
         have our annotations).
@@ -322,41 +396,52 @@ class EstablishedListener(BaseAnnotatedConnection):
         future.
         """
 
-        self.log(7, "received line from client {}", repr(data))
-        data = data.rstrip('\r\n')        # remove the ending new-line
+        self.log(7, "received line from client {}", repr(in_line_from_client))
+        in_line_from_client = in_line_from_client.rstrip('\r\n')
         # encode the JSON object with the annotation of the timestamp in this
         # proxy. Before adding the annotation in this proxy, we must try to
         # decode the read-data as a JSON object (if it was a JSON object read)
         try:
-            object_read = tornado.escape.json_decode(str(data))
+            object_read = tornado.escape.json_decode(str(in_line_from_client))
             # we expect that the JSON object decoded was a complex object
             # (like a Python Dictionary), not an elementary one (like an 'int')
             # If it was an elementary one, then we convert it to a dictionary
             if not isinstance(object_read, dict):
+                self.log(5, "The incoming client didn't send us a dictionary:"
+                         " we'll wrap its line {}", repr(in_line_from_client))
                 object_read = {}
-                object_read['line'] = str(data)
+                object_read['line'] = str(in_line_from_client)
         except ValueError:
-            # the data was raw-data, like a 'string', so it couldn't be JSON
-            # decoded
+            # the input line from the client was raw-data, like a 'string', so
+            # it couldn't be JSON decoded
+            self.log(4, "The incoming client didn't send us a JSON object:"
+                     " is it trying a direct connection. Its line was: {}",
+                     repr(in_line_from_client))
             object_read = {}
-            object_read['line'] = str(data)
+            object_read['line'] = str(in_line_from_client)
+
+        # At this point we have decoded in layer 7 the dictionary "object_read"
+        # that the remote, incoming client has sent us.
 
         if not self._dont_add_perf_headers:
-            # we add our annotations in this packet
+            # we add our annotations in this packet. We only happen to annotate
+            # our current epoch-time in milliseoconds, although we could add
+            # more annotations
             epoch_in_millis = str(int(time.time() * 1000))
             object_read[self._initial_annotation_key] = epoch_in_millis
 
         json_annotated_object = tornado.escape.json_encode(object_read)
 
         if self.forw_stream:
-            self.log(6, "forwarding JSON to next proxy {}",
+            # we have a forwarding proxy down the loop to which to send the data
+            self.log(6, "forwarding JSON to next proxy down the loop {}",
                      repr(json_annotated_object))
             yield self.forw_stream.write("%s\n" % json_annotated_object)
             self._read_line_back_from_forwarder()  # we just sent a line to fwd
         else:
-           # we have no other forwarding proxy to send the data, so simply
-           # answer directly to our client
-            self.log(6, "answering JSON back to client {}",
+            # we have no other forwarding proxy to send the data, so simply
+            # answer directly to our client
+            self.log(6, "answering JSON back to incoming client {}",
                      repr(json_annotated_object))
             yield self.client_stream.write("%s\n" % json_annotated_object)
         self._read_line_from_client()
@@ -364,54 +449,100 @@ class EstablishedListener(BaseAnnotatedConnection):
 
 
     @tornado.gen.coroutine
-    def _handle_read_back_from_forwrdr(self, data):
+    def _handle_read_back_from_forwrdr(self, line_answered_back_from_forwdr):
         """Handle a line answered back from the next hop we had forwarded to,
-        in order to update our annotations we had put in this line before
-        sending it to that forwarding proxy."""
+        ie., this is not an incoming line that 'self.client_stream' send us,
+        but a returning line that 'self.forw_stream' is answering back to us.
 
-        self.log(6, "received a line back from forwader {}", repr(data))
-        data = data.rstrip('\r\n')        # remove the ending new-line
+        We have to update our annotations we had put in this line before
+        sending it to that forwarding proxy 'self.forw_stream'. For this reason,
+        one difference between
+                 self._handle_read_from_client()
+        and this
+                 self._handle_read_back_from_forwrdr()
+        is that the latter is more strict in its error checking -because we
+        know what we had annotated into the packet before sending it to the
+        forwarder-, while the former method is more lax because we don't know
+        what annotations the remote, incoming client had done.
+        """
+
+        self.log(6, "received a line back from forwader {}",
+                 repr(line_answered_back_from_forwdr))
+        line_answered_back_from_forwdr = \
+                             line_answered_back_from_forwdr.rstrip('\r\n')
         try:
-            object_read = tornado.escape.json_decode(str(data))
+            object_answered = tornado.escape.json_decode(
+                str(line_answered_back_from_forwdr))
+
             # we expect that the JSON object decoded was a complex object
             # (like a Python Dictionary), not an elementary one (like an 'int')
             # If it was an elementary one, then we convert it to a dictionary
-            if not isinstance(object_read, dict):
-                object_read = {}
-                object_read['line'] = str(data)
+            if not isinstance(object_answered, dict):
+                self.log(3, "The forwarding proxy didn't answer a dictionary:"
+                         " we'll wrap its line {}",
+                         repr(line_answered_back_from_forwdr))
+                object_answered = {}
+                object_answered['line'] = str(line_answered_back_from_forwdr)
         except ValueError:
             # the data was raw-data, like a 'string', so it couldn't be JSON
             # decoded
-            object_read = {}
-            object_read['line'] = str(data)
+            self.log(3, "The forwarding proxy didn't answer a JSON object:"
+                     " Its line was: {}",
+                     repr(line_answered_back_from_forwdr))
+            object_answered = {}
+            object_answered['line'] = str(line_answered_back_from_forwdr)
 
         # find our original annotation, that we put in the JSON object
         # before sending it to the next forwarding proxy, back in the
         # returned JSON object from the next forwarding proxy
-        if not self._dont_add_perf_headers and \
-           self._initial_annotation_key in object_read:
-            original_time = object_read[self._initial_annotation_key]
-            original_time = int(original_time)
-            curr_epoch_in_millis = int(time.time() * 1000)
-            delay_in_millis = str(curr_epoch_in_millis - original_time)
-            # the answering packet is doing its return trip, so delete the
-            # old annotation key and annotate the packet with final key
-            del object_read[self._initial_annotation_key]
-            object_read[self._final_annotation_key] = delay_in_millis
+        if not self._dont_add_perf_headers:
+            # we had added our annotation inside this line, so we expect
+            # to find our annotation key in this dictionary
+            if not self._initial_annotation_key in object_answered:
+                self.log(3, "We didn't find our annotation key '{}' back"
+                         " in the line answered back from forwarder: {}",
+                         self._initial_annotation_key,
+                         repr(line_answered_back_from_forwdr))
+            else:
+                # our annotation key is inside the object_answered from forwrdr
+                original_time = object_answered[self._initial_annotation_key]
+                try:
+                    # Our annotation was an "int", so try to decode it back
+                    original_time = int(original_time)
+                    curr_epoch_in_millis = int(time.time() * 1000)
+                    delay_millis = str(curr_epoch_in_millis - original_time)
+                    # annotate the packet with our final key
+                    object_answered[self._final_annotation_key] = delay_millis
+                except ValueError:
+                    self.log(3, "We didn't find our integer annotation, but a"
+                             " generic string annotation '{}' as value for our"
+                             " annotation key '{}' in the line answered back"
+                             " from forwarder: {}",
+                             object_answered[self._initial_annotation_key],
+                             self._initial_annotation_key,
+                             repr(line_answered_back_from_forwdr))
+                finally:
+                    # the answering packet is doing its return trip, so delete
+                    # the old annotation key
+                    del object_answered[self._initial_annotation_key]
 
+        json_annotated_object = tornado.escape.json_encode(object_answered)
 
-        json_annotated_object = tornado.escape.json_encode(object_read)
-
+        # relay the answer from our upstream to our original incoming client
         yield self.client_stream.write("%s\n" % json_annotated_object)
         self._read_line_from_client()
 
 
 
+#
+# class ListeningServer(tornado.tcpserver.TCPServer):
+#
 
 class ListeningServer(tornado.tcpserver.TCPServer):
     """ The listener server, which opens the listening socket and, once
         it accepts an incoming connections, creates the
         EstablishedListener instance to handle this incoming connection. """
+
 
     def __init__(self, forwarding_dest, dont_add_perf_headers,
                  log_verbosity):
@@ -420,6 +551,7 @@ class ListeningServer(tornado.tcpserver.TCPServer):
         self._dont_add_perf_headers = dont_add_perf_headers
         self._local_address = ""  # we don't know yet where we should listen
         self._log_verbosity = log_verbosity
+
 
 
     def listen(self, port, address=""):
@@ -458,8 +590,8 @@ class ListeningServer(tornado.tcpserver.TCPServer):
                                    self._log_verbosity)
 
         if self._log_verbosity == 7:
-            sys.stderr.write("DEBUG: yielding to conn.on_connect()\n")
-        yield conn.on_connect()
+            sys.stderr.write("DEBUG: yielding to c.prepare_incoming_connection")
+        yield conn.prepare_incoming_connection()
         if self._log_verbosity == 7:
             sys.stderr.write("DEBUG: exiting handle_stream\n")
 
@@ -467,6 +599,10 @@ class ListeningServer(tornado.tcpserver.TCPServer):
 
 
 
+
+#
+# class StdInputForwardingClient(BaseAnnotatedConnection):
+#
 
 class StdInputForwardingClient(BaseAnnotatedConnection):
     """ This is an independent forwarding client, when there is no listener
@@ -583,22 +719,24 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         forw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         self.forw_stream = tornado.iostream.IOStream(forw_socket)
         self.forw_stream.connect((self.forwarding_addr, self.forwarding_port))
+        self.forw_stream.set_close_callback(self.on_forwarder_disconnect)
         self.forw_stream.set_nodelay(True)                # TCP_NODELAY option
         self.forw_stream.socket.setsockopt(socket.IPPROTO_TCP,
                                            socket.SO_KEEPALIVE, 1)
-        self.forw_stream.set_close_callback(self.on_forwarder_disconnect)
 
 
 
     @tornado.gen.coroutine
     def on_forwarder_disconnect(self):
         """The forwarder has disconnected from us."""
+
         self.log(7, "on_forwarder_disconnect")
 
         # Prepare to stop the Tornado IOLoop, since the forwarding-proxy has
         # disconnected from us
-        # TODO: should a new connection tried to be re-opened to the
-        # forwarding proxy? If so, how many times to attempt reconnecting?
+        # TODO: should a new connection tried to be re-opened to the upstream?
+        # ie, to the forwarding proxy? If so, how many times to attempt
+        # reconnecting?
         ioloop = tornado.ioloop.IOLoop.instance()
         ioloop.remove_handler(0)
         ioloop.add_callback(lambda x: x.stop(), ioloop)
@@ -610,7 +748,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
 
     @tornado.gen.coroutine
-    def _handle_read_back_from_forwrdr(self, data):
+    def _handle_read_back_from_forwrdr(self, line_answered_back_from_forwdr):
         """Handle a line answered back from the next hop we had forwarded to,
         in order to update our annotations we had put in this line before
         sending it to that forwarding proxy.
@@ -618,35 +756,65 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         from standard-input
         """
 
-        self.log(6, "received line back from forwarder {}", repr(data))
-        data = data.rstrip('\r\n')        # remove the ending new-line
+        self.log(6, "received line back from forwarder {}",
+                 repr(line_answered_back_from_forwdr))
+        line_answered_back_from_forwdr = \
+                             line_answered_back_from_forwdr.rstrip('\r\n')
         try:
-            object_read = tornado.escape.json_decode(str(data))
+            object_answered = tornado.escape.json_decode(
+                str(line_answered_back_from_forwdr))
             # we expect that the JSON object decoded was a complex object
             # (like a Python Dictionary), not an elementary one (like an 'int')
             # If it was an elementary one, then we convert it to a dictionary
-            if not isinstance(object_read, dict):
-                object_read = {}
-                object_read['line'] = str(data)
+            if not isinstance(object_answered, dict):
+                self.log(3, "The forwarding proxy didn't answer a dictionary:"
+                         " we'll wrap its line {}",
+                         repr(line_answered_back_from_forwdr))
+                object_answered = {}
+                object_answered['line'] = str(line_answered_back_from_forwdr)
         except ValueError:
             # the data was raw-data, like a 'string', so it couldn't be JSON
             # decoded
-            object_read = {}
-            object_read['line'] = str(data)
+            self.log(3, "The forwarding proxy didn't answer a JSON object:"
+                     " Its line was: {}",
+                     repr(line_answered_back_from_forwdr))
+            object_answered = {}
+            object_answered['line'] = str(line_answered_back_from_forwdr)
 
         # find our original annotation, that we put in the JSON object
         # before sending it to the next forwarding proxy, back in the
         # returned JSON object from the next forwarding proxy
-        if not self._dont_add_perf_headers and \
-           self._initial_annotation_key in object_read:
-            original_time = object_read[self._initial_annotation_key]
-            original_time = int(original_time)
-            curr_epoch_in_millis = int(time.time() * 1000)
-            delay_in_millis = str(curr_epoch_in_millis - original_time)
-            # the answering packet is doing its return trip, so delete the
-            # old annotation key and annotate the packet with final key
-            del object_read[self._initial_annotation_key]
-            object_read[self._final_annotation_key] = delay_in_millis
+        if not self._dont_add_perf_headers:
+            # we had added our annotation inside this line, so we expect
+            # to find our annotation key in this dictionary
+            if not self._initial_annotation_key in object_answered:
+                self.log(3, "We didn't find our annotation key '{}' back"
+                         " in the line answered back from forwarder: {}",
+                         self._initial_annotation_key,
+                         repr(line_answered_back_from_forwdr))
+            else:
+                # our annotation key is inside the object_answered from forwrdr
+                original_time = object_answered[self._initial_annotation_key]
+                try:
+                    # Our annotation was an "int", so try to decode it back
+                    original_time = int(original_time)
+                    curr_epoch_in_millis = int(time.time() * 1000)
+                    delay_millis = str(curr_epoch_in_millis - original_time)
+                    # annotate the packet with our final key
+                    object_answered[self._final_annotation_key] = delay_millis
+                except ValueError:
+                    self.log(3, "We didn't find our integer annotation, but a"
+                             " generic string annotation '{}' as value for our"
+                             " annotation key '{}' in the line answered back"
+                             " from forwarder: {}",
+                             object_answered[self._initial_annotation_key],
+                             self._initial_annotation_key,
+                             repr(line_answered_back_from_forwdr))
+                finally:
+                    # the answering packet is doing its return trip, so delete
+                    # the old annotation key
+                    del object_answered[self._initial_annotation_key]
+
 
         # dump the annotations received from the network loop to std-out
         # Note that this dump is not affected by the value of our
@@ -655,29 +823,38 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         # but other loops indirectly connected to this could have added
         # their respective annotations on performance headers, so we
         # need to print them
-        for key in sorted(object_read):
+        for key in sorted(object_answered):
             if key != 'line':
                 yield self.stdout.write("<-- %s = %s\n" % \
-                                  (str(key), str(object_read[key])))
+                                  (str(key), str(object_answered[key])))
 
         # Write the original line back to the std-out (an echo of origina;
         # line)
-        if 'line' in object_read:
-            yield self.stdout.write("< Line: %s\n" % str(object_read['line']))
+        if 'line' in object_answered:
+            yield self.stdout.write("< Line: %s\n" % \
+                                             str(object_answered['line']))
 
         yield self._read_line_from_std_input()
         # yield self._read_line_back_from_forwarder()
 
 
 
-
+#
+# function run_listener(...):
+#
+#   a utility wrapper creating an object of the class
+#   ListeningServer(tornado.tcpserver.TCPServer) and
+#   start the Tornado IOLoop
+#
 
 def run_listener(listen_addr, forwarding_dest=None,
                  dont_add_perf_headers=False, debug_level=0):
 
-    """
-    Run TCP proxy on the specified 'listen_addr', to optionally forward
-    to a next proxy at address 'forwarding_dest'.
+    """ Run TCP proxy 'ListeningServer' on the specified 'listen_addr', to
+        optionally forward to a next upstream proxy at address
+        'forwarding_dest'.
+
+        Start the Tornado IOLoop
     """
 
     # http://tornado.readthedocs.org/en/latest/tcpserver.html
@@ -699,9 +876,20 @@ def run_listener(listen_addr, forwarding_dest=None,
 
 
 
+#
+# function run_forwarder(...):
+#
+#   a utility wrapper creating an object of the class
+#   StdInputForwardingClient(...) and start the Tornado IOLoop
+#
+
 def run_forwarder(forward_to_addr, dont_add_perf_headers=False,
                   debug_level=0):
-    """ Run the forwarder from standard-input to a remote proxy. """
+    """ Run the forwarder from standard-input to a remote proxy, ie.,
+        an object of the class StdInputForwardingClient()
+
+        Start the Tornado IOLoop.
+    """
 
     stdin_readr = StdInputForwardingClient(forward_to_addr,
                                            dont_add_perf_headers, debug_level)
@@ -711,12 +899,12 @@ def run_forwarder(forward_to_addr, dont_add_perf_headers=False,
 
 
 
-#### MAIN #####
+#### MAIN FUNCTION #####
 
 def main():
     """Main() entry-point to this script."""
 
-    debug_level = 6     # 0: emerg; ... 6: informational; 7: debug
+    debug_level = 5     # 0: emerg; ... 6: informational; 7: debug
     listen_port = None
     forward_to_addr = None
     dont_add_perf_headers = False
@@ -736,7 +924,7 @@ def main():
                                      epilog=pyscript_docstring,
                                      formatter_class=\
                                                   RawDescriptionHelpFormatter)
-    parser.add_argument('-d', '--debug', nargs=1, default=6, required=False,
+    parser.add_argument('-d', '--debug', nargs=1, default=5, required=False,
                         type=int, metavar='debug',
                         help='Specify the debug-level for which to report. '
                              '(default: %(default)d)')
@@ -762,7 +950,13 @@ def main():
     if args.listen:
         listen_port = args.listen[0]
     if args.debug:
-        debug_level = args.debug
+        if isinstance(args.debug, list):
+            # this type check is necessary for some argparse.ArgumentParser()
+            # installed in Mac OS/X
+            debug_level = args.debug[0]
+        else:
+            # normal case for argparse.ArgumentParser() in Linux
+            debug_level = args.debug
     if args.dont_add_perf_headers:
         dont_add_perf_headers = True
 
@@ -771,7 +965,14 @@ def main():
                      debug_level)
     elif forward_to_addr:
         run_forwarder(forward_to_addr, dont_add_perf_headers, debug_level)
-
+    else:
+        sys.stderr.write("ERROR:\nAt least one option of '-l|--listen' or "
+                         "'-f|--forward_to', or both options\n"
+                         "(for full-proxy mode), must be given in the "
+                         "command line.\n\n")
+        # print the usage string of our script (that is the same as the
+        # documentation in this script's doctring)
+        sys.stderr.write(pyscript_docstring + "\n")
 
 
 if __name__ == '__main__':
