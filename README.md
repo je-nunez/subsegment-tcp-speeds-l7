@@ -4,21 +4,6 @@
 
 This project is a *work in progress*. The implementation is *incomplete* and subject to change. The documentation can be inaccurate.
 
-# Requeriments
-
-You need to install the Python `Tornado` module:
-
-     pip install tornado
-
-or
-
-     easy_install tornado
-
-
-# Current state
-
-The old version was substituted by a new one based on the Tornado framework (with basic `TCPServer`s and `IOStream`s) since it has less issues with concurrency. The old version is still available here.
-
 # Description
 
 In time-sensitive networks, to find which network subsegment has the highest increase in TCP delay (similar to tcptraceroute but higher in the protocol-stack and not using the IP TTL field, because when the TTL expires, this condition is handled immediately in kernel mode)
@@ -43,6 +28,16 @@ Custom http headers for the time at each processing host can be similar to the `
         Via: 1.1 v1-akamaitech.net(ghost) (AkamaiGHost), 1.1 akamai.net(ghost) (AkamaiGHost), 1.1 cach06 (squid/3.5.1)
 
         http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.45
+
+# Requeriments
+
+You need to install the Python `Tornado` module:
+
+     pip install tornado
+
+or
+
+     easy_install tornado
 
 # Usage:
 
@@ -209,4 +204,9 @@ A different approach is the `IP Flow Information Export` protocol, where the rou
 and switches send flow information outband (see `RFCs 7011 and 7015`). This idea is
 used, eg., in Linux, by the `conntrackd` daemon and the `conntrack` command-line
 program can do statistics gathering.
+
+
+# Current state
+
+The old version was substituted by a new one based on the Tornado framework (with basic `TCPServer`s and `IOStream`s) since it has less issues with concurrency. The old version is still available here.
 
