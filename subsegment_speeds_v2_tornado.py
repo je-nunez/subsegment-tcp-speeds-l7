@@ -226,7 +226,11 @@ class BaseAnnotatedConnection(object):
 
         # The debug log level and msg-preffix to use for this instance
         self._log_verbosity = log_verbosity
-        self._log_tag_preffix = log_tag_preffix
+        # The log preffix to print to std-error is the tag plus the random
+        # cookie (salt) which we also send as our annotations inside the
+        # packets, so there is a way to correlate logs in std-error with
+        # packets received in the remote hops in the loop
+        self._log_tag_preffix = '%s -%d' % (log_tag_preffix, my_salt)
 
 
 
