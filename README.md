@@ -23,15 +23,15 @@ This is similar in idea (although this program works on raw TCP) to what HAProxy
 
 where "%ms" is the timestamp in milliseconds when this HTTP header is added by the HTTP proxy ( for internals, see http://git.haproxy.org/?p=haproxy-1.5.git;a=blob;f=src/log.c;hb=HEAD#l1140 about the usage of "%ms"). (Disclaimer: the current python program is not at the HTTP level as HAProxy can be, but at the TCP level, and it is inspired by that idea in HAProxy, but does not utilize that code). (So far, HAProxy allows those custom values, as "%ms", in custom http-headers; nginx will have it soon: http://wiki.nginx.org/HttpHeadersMoreModule#TODO )
 
-This is similar in idea too to what the Akamai Content Delivery Network (CDN)
-does with this request ( http://time.akamai.com/?xml )
+This project is similar in idea too to what the Akamai Content Delivery Network (CDN)
+does with this request ( click here: http://time.akamai.com/?xml )
 
        $ curl http://time.akamai.com/?xml ; echo
 
           .... <rtt>2</rtt>...
 
-where it prints the RTT in this segment, whose extremes are the client and the
-`time.akamai.com`, although this project finds the RTT delays in multiple 
+where it prints the RTT in this segment, whose extremes are the `curl` client or browser
+and the `time.akamai.com` server, although this project finds the RTT delays in multiple
 segments (as those found in a layer of proxies, load balancers, etc). (The
 documentation for the Akamai feature can be found here:
 
