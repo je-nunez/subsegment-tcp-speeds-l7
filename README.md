@@ -32,7 +32,7 @@ does with this request ( click here: http://time.akamai.com/?xml )
 
 where it prints the RTT in this segment, whose extremes are the `curl` client or browser
 and the `time.akamai.com` server, although this project finds the RTT delays in multiple
-segments (as those found in a layer of proxies, load balancers, etc). (The
+segments (as those found in multiple layers of proxies, load balancers, etc). (The
 documentation for the Akamai feature can be found here:
 
      https://developer.akamai.com/stuff/Akamai_Time_Reference/AkamaiTimeReference.html
