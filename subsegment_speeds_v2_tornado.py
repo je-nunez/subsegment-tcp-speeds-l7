@@ -5,7 +5,6 @@
 # that is a Tornado HTTPproxy in the PyPi repo (but this script is a TCP proxy)
 #
 # pylint: disable=too-many-arguments
-# pylint: disable=too-few-public-methods
 
 """Program for helping to isolate which sub-segment in a network [or proxy host
 in a network] influences more in the delay of a network transmission.
@@ -133,9 +132,8 @@ import os
 import argparse
 from argparse import RawDescriptionHelpFormatter
 import inspect
-import time
-# import dateutil.parser
-# from copy import copy
+from datetime import datetime
+# import time
 import socket
 import re
 import random
@@ -146,6 +144,10 @@ import tornado.iostream
 import tornado.escape
 import tornado.tcpclient
 import tornado.tcpserver
+
+# The origin of the Unix time (the origin of the Epoch)
+
+EPOCH_ORIGIN = None
 
 # On debugging (option -d <debug_level>)
 #
@@ -161,7 +163,6 @@ import tornado.tcpserver
 #    Critical  =  2
 #    Alert     =  1
 #    Emergency =  0
-
 
 
 #
@@ -205,34 +206,38 @@ class BaseAnnotatedConnection(object):
 
     def __init__(self, string1, string2, log_verbosity, log_tag_preffix):
         # first, clear the chactacters in both string[12]
-        tmp_string1 = re.sub(r"[^a-zA-Z0-9]", "_", string1)
-        tmp_string2 = re.sub(r"[^a-zA-Z0-9]", "_", string2)
-
-        # build the initial annotation key (when the packet first enters
-        # this network hop)
-        my_salt = random.randint(0, 10000000)
-        annotation_fieldname_uuid = "X_My_Annotation_%s_%s_%d" % \
-              (tmp_string1, tmp_string2, my_salt)
-        # TODO: this UUID of the annotation should be MD5-ed to obscure it
-        # for security (like with hashlib.md5())
-        self._initial_annotation_key = annotation_fieldname_uuid
-
-
-        # build the final annotation key (when the return, answer packet
-        # exits this network hop)
-        annotation_fieldname_uuid = "Delay between %s and %s" % \
-                                    (tmp_string1, tmp_string2)
-        self._final_annotation_key = annotation_fieldname_uuid
+        self._initiator_str = re.sub(r"[^a-zA-Z0-9]", "_", string1)
+        self._next_hop_str = re.sub(r"[^a-zA-Z0-9]", "_", string2)
+        self._general_log_tag = log_tag_preffix
 
         # The debug log level and msg-preffix to use for this instance
         self._log_verbosity = log_verbosity
-        # The log preffix to print to std-error is the tag plus the random
-        # cookie (salt) which we also send as our annotations inside the
-        # packets, so there is a way to correlate logs in std-error with
-        # packets received in the remote hops in the loop
-        self._log_tag_preffix = '%s -%d' % (log_tag_preffix, my_salt)
 
+        # build the final annotation key (when the return, answer packet
+        # exits this network hop). This final annotation doesn't have
+        # a cookie (salt)
+        annotation_fieldname_uuid = "Delay between %s and %s" % \
+                                    (self._initiator_str, self._next_hop_str)
+        self._final_annotation_key = annotation_fieldname_uuid
 
+        # build the very initial annotation cookie (salt) (before the packet
+        # first enters this network hop)
+        self.set_cookie(str(random.randint(0, 10000000)))
+
+    def peek_possible_annotation_key(self, cookie):
+        """Peek the possible annotation key for a cookie."""
+        return "X_My_Annotation_%s_%s_%s" % \
+                    (self._initiator_str, self._next_hop_str, cookie)
+
+    def set_cookie(self, cookie):
+        """Some values we annotate into the packets or log, append a cookie
+        for easier identification and tracking across the chain of proxies."""
+
+        # set the self._initial_annotation_key according to the given cookie
+        self._initial_annotation_key = "X_My_Annotation_%s_%s_%s" % \
+              (self._initiator_str, self._next_hop_str, cookie)
+
+        self._log_tag_preffix = '%s -%s' % (self._general_log_tag, cookie)
 
     def log(self, msg_severity, msg, *args, **kwargs):
         """Print the log message if its severity is important enough."""
@@ -240,9 +245,6 @@ class BaseAnnotatedConnection(object):
         if msg_severity <= self._log_verbosity:
             sys.stderr.write("[{}]: {}\n".format(self._log_tag_preffix,
                                                  msg.format(*args, **kwargs)))
-
-
-
 
 
 #
@@ -277,11 +279,10 @@ class EstablishedListener(BaseAnnotatedConnection):
         stream.socket.setsockopt(socket.IPPROTO_TCP, socket.SO_KEEPALIVE, 1)
 
         self.client_addr = client_addr  # the client which connect()-ed to us
-        self.forwarding_destination = forwarding_dest # where to forward to
+        self.forwarding_destination = forwarding_dest  # where to forward to
         self.forw_stream = None         # we still don't have a fwd connection
         self._dont_add_perf_headers = dont_add_perf_headers
-
-
+        self._cookie_cloned = False     # our cookie (or salt) is still random
 
     @tornado.gen.coroutine
     def prepare_incoming_connection(self):
@@ -319,8 +320,6 @@ class EstablishedListener(BaseAnnotatedConnection):
 
         return
 
-
-
     @tornado.gen.coroutine
     def handle_new_incoming_connection(self):
         """A remote client has connected from this listener
@@ -330,8 +329,6 @@ class EstablishedListener(BaseAnnotatedConnection):
         except tornado.iostream.StreamClosedError:
             pass  # see callback on_incoming_client_disconnect() below
         return
-
-
 
     @tornado.gen.coroutine
     def on_incoming_client_disconnect(self):
@@ -347,14 +344,12 @@ class EstablishedListener(BaseAnnotatedConnection):
         self.log(5, "incoming client has disconnected")
         return
 
-
-
     @tornado.gen.coroutine
     def on_forwarder_disconnect(self):
         """The forwarder has disconnected from us."""
         self.log(7, "on_forwarder_disconnect")
 
-        # TODO: should a new connection tried to be re-opened to the upstream?
+        # TODO: should it retry to re-open a new connection to upstream?
         # ie, to the forwarding proxy? If so, how many times to attempt
         # reconnecting?
 
@@ -368,16 +363,12 @@ class EstablishedListener(BaseAnnotatedConnection):
         self.log(3, "forwarding-proxy has disconnected from us")
         return
 
-
-
     @tornado.gen.coroutine
     def _read_line_from_client(self):
         """Read a line from the incoming client, which doesn't have our
         annotations yet (it is the first time this line is seen by us)."""
 
         self.client_stream.read_until('\n', self._handle_read_from_client)
-
-
 
     @tornado.gen.coroutine
     def _read_line_back_from_forwarder(self):
@@ -387,7 +378,63 @@ class EstablishedListener(BaseAnnotatedConnection):
 
         self.forw_stream.read_until('\n', self._handle_read_back_from_forwrdr)
 
+    def _clone_transaction_cookie(self, incomming_dict_from_client):
+        """Try to set our cookie (or 'salt') to be the same cookie (or
+        'salt') as was received from the incoming client connection, instead
+        of using a random cookie (or 'salt')
 
+        In this way, while it is true that each proxy in the connection chain
+        does insert its own annotations into the packet independently of the
+        other proxies in the chain:
+
+            X_My_Annotation_<client_1>_<cookie1>: <value-from-client-1>
+            X_My_Annotation_<client_2>_<cookie2>: <value-from-client-2>
+            ...
+            X_My_Annotation_<client_N>_<cookieN>: <value-from-client-N>
+
+        it is true too that each proxy will try to use the same <cookie> (or
+        'salt') as it has received from its client proxy (ie, all of
+        '_<cookie[i]>' suffixes in the keys above should be the same)."""
+
+        # Try to find the first key in the "incomming_dict_from_client" which
+        # starts with the prefix "X_My_Annotation_": then, for such
+        # pre-existing key, its suffix "_<cookie>" is the <cookie> (salt) we
+        # received from the client and we must re-use as our same <cookie>
+        a_key = ''
+        for key in incomming_dict_from_client:      # search incoming keys
+            if key.startswith('X_My_Annotation_'):  # search is sucessful
+                a_key = key
+                break
+
+        if not a_key:
+            # We couldn't find an incoming key with such prefix. As an
+            # optimization, we say that the cookie was set, because we
+            # shouldn't be calling this procedure -which does the above
+            # search- for each received packet (dictionary), only for the
+            # very first, and then, for this first packet (dict) received,
+            # inherit its incoming cookie (or not, as is in this case, where
+            # we continue using our random cookie)
+            self.log(4, "incoming client didn't add its annotation into the "
+                        "first packet for us to clone its ID-cookie in it")
+            self._cookie_cloned = True     # don't try to call this search again
+            return
+
+        # The value of the incoming key is 'X_My_Annotation_..._<cookie>', so
+        # we try to split it by '_' and get the last value, that is the cookie
+        client_cookie = a_key.rpartition('_')[-1]
+        my_possible_key = self.peek_possible_annotation_key(client_cookie)
+        # Check if 'my_possible_key' for annotating is not already in use by
+        # another client for its own annotation, so I don't overwrite its
+        # annotations
+        if my_possible_key not in incomming_dict_from_client:
+            # ok: no other client has used my possible key for its annotations
+            old_log_tag_preffix = self._log_tag_preffix
+            self.set_cookie(client_cookie)   # clone incoming client cookie
+            self.log(7, "no longer using log-tag: '%s': hop has cloned the "
+                        "same ID-cookie for its annotations as the same "
+                        "ID-cookie its client is using for its respective "
+                        "annotations" % old_log_tag_preffix)
+        self._cookie_cloned = True     # don't try to call this search again
 
     @tornado.gen.coroutine
     def _handle_read_from_client(self, in_line_from_client):
@@ -431,8 +478,16 @@ class EstablishedListener(BaseAnnotatedConnection):
             # we add our annotations in this packet. We only happen to annotate
             # our current epoch-time in milliseoconds, although we could add
             # more annotations
-            epoch_in_millis = str(int(time.time() * 1000))
-            object_read[self._initial_annotation_key] = epoch_in_millis
+            if not self._cookie_cloned:
+                # Our cookie has still its random initial value, so try to
+                # clone the same cookie received from the client
+                self._clone_transaction_cookie(object_read)
+            now = datetime.now()
+            global EPOCH_ORIGIN
+            delta_epoch = (now - EPOCH_ORIGIN)
+            value = delta_epoch.seconds + delta_epoch.microseconds / 1000000
+            object_read[self._initial_annotation_key] = str(value)
+            self.log(7, "Annoting with time %d" % value)
 
         json_annotated_object = tornado.escape.json_encode(object_read)
 
@@ -449,8 +504,6 @@ class EstablishedListener(BaseAnnotatedConnection):
                      repr(json_annotated_object))
             yield self.client_stream.write("%s\n" % json_annotated_object)
         self._read_line_from_client()
-
-
 
     @tornado.gen.coroutine
     def _handle_read_back_from_forwrdr(self, line_answered_back_from_forwdr):
@@ -502,7 +555,7 @@ class EstablishedListener(BaseAnnotatedConnection):
         if not self._dont_add_perf_headers:
             # we had added our annotation inside this line, so we expect
             # to find our annotation key in this dictionary
-            if not self._initial_annotation_key in object_answered:
+            if self._initial_annotation_key not in object_answered:
                 self.log(3, "We didn't find our annotation key '{}' back"
                          " in the line answered back from forwarder: {}",
                          self._initial_annotation_key,
@@ -511,14 +564,17 @@ class EstablishedListener(BaseAnnotatedConnection):
                 # our annotation key is inside the object_answered from forwrdr
                 original_time = object_answered[self._initial_annotation_key]
                 try:
-                    # Our annotation was an "int", so try to decode it back
-                    original_time = int(original_time)
-                    curr_epoch_in_millis = int(time.time() * 1000)
-                    delay_millis = str(curr_epoch_in_millis - original_time)
+                    # Our annotation was an "float", so try to decode it back
+                    original_time = float(original_time)
+                    now = datetime.now()
+                    global EPOCH_ORIGIN
+                    delta_epoch = (now - EPOCH_ORIGIN)
+                    curr_epoch = delta_epoch.seconds + delta_epoch.microseconds / 1000000
+                    delay_micros = str(curr_epoch - original_time)
                     # annotate the packet with our final key
-                    object_answered[self._final_annotation_key] = delay_millis
+                    object_answered[self._final_annotation_key] = delay_micros
                 except ValueError:
-                    self.log(3, "We didn't find our integer annotation, but a"
+                    self.log(3, "We didn't find our float-pt annotation, but a"
                              " generic string annotation '{}' as value for our"
                              " annotation key '{}' in the line answered back"
                              " from forwarder: {}",
@@ -537,16 +593,13 @@ class EstablishedListener(BaseAnnotatedConnection):
         self._read_line_from_client()
 
 
-
 #
 # class ListeningServer(tornado.tcpserver.TCPServer):
-#
 
 class ListeningServer(tornado.tcpserver.TCPServer):
     """ The listener server, which opens the listening socket and, once
         it accepts an incoming connections, creates the
         EstablishedListener instance to handle this incoming connection. """
-
 
     def __init__(self, forwarding_dest, dont_add_perf_headers,
                  log_verbosity):
@@ -555,8 +608,6 @@ class ListeningServer(tornado.tcpserver.TCPServer):
         self._dont_add_perf_headers = dont_add_perf_headers
         self._local_address = ""  # we don't know yet where we should listen
         self._log_verbosity = log_verbosity
-
-
 
     def listen(self, port, address=""):
         """ Listen at this local address, and prepare what is our address
@@ -575,8 +626,6 @@ class ListeningServer(tornado.tcpserver.TCPServer):
             my_host_fqdn = re.sub(r"[^a-zA-Z0-9]", "_", my_host_fqdn)
 
             self._local_address = "%s:%d" % (my_host_fqdn, port)
-
-
 
     @tornado.gen.coroutine
     def handle_stream(self, stream, clnt_address):
@@ -602,8 +651,6 @@ class ListeningServer(tornado.tcpserver.TCPServer):
         return
 
 
-
-
 #
 # class StdInputForwardingClient(BaseAnnotatedConnection):
 #
@@ -623,7 +670,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         remote_addr, remote_port = forwarding_destination.split(":")
         self.forwarding_addr = remote_addr      # we need to forward to the next
-        self.forwarding_port = int(remote_port) # proxy at this address and port
+        self.forwarding_port = int(remote_port)  # proxy to this address:port
         self.forw_stream = None   # we are not connected yet to this fwd proxy
         self._dont_add_perf_headers = dont_add_perf_headers
         # convert sys.stdin to a Tornado IOStream, to read from it asynchron,
@@ -631,8 +678,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         self.stdout = tornado.iostream.PipeIOStream(sys.stdout.fileno())
 
         self.stdin.set_close_callback(self.on_stdinput_eof)
-
-
 
     @tornado.gen.coroutine
     def on_stdinput_eof(self):
@@ -650,14 +695,10 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         self.log(3, "EOF-standard-input")
         return
 
-
-
     @tornado.gen.coroutine
     def read_first_line_from_std_input(self):
         """Read the very first line from the standard input."""
         self._read_line_from_std_input()
-
-
 
     @tornado.gen.coroutine
     def _read_line_from_std_input(self):
@@ -666,8 +707,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         self.stdin.read_until('\n', self._handle_read_from_std_input)
 
-
-
     @tornado.gen.coroutine
     def _read_line_back_from_forwarder(self):
         """Read a line which the forwarding proxy has answered back to us.
@@ -675,8 +714,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         by us."""
 
         self.forw_stream.read_until('\n', self._handle_read_back_from_forwrdr)
-
-
 
     @tornado.gen.coroutine
     def _handle_read_from_std_input(self, input_line):
@@ -695,8 +732,10 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         # annotate this line (dictionary) adding our headers
         if not self._dont_add_perf_headers:
-            epoch_in_millis = str(int(time.time() * 1000))
-            dict_repr[self._initial_annotation_key] = epoch_in_millis
+            now = datetime.now()
+            delta_epoch = (now - EPOCH_ORIGIN)
+            value = delta_epoch.seconds + delta_epoch.microseconds / 1000000
+            dict_repr[self._initial_annotation_key] = str(value)
 
         # convert our dictionary to a JSON object before transmission
         json_annotated_object = tornado.escape.json_encode(dict_repr)
@@ -714,8 +753,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         yield self._read_line_back_from_forwarder()  # just sent a line to fwd
         # yield self._read_line_from_std_input()
 
-
-
     @tornado.gen.coroutine
     def connect(self):
         """ Connect to the remote forwarding server. """
@@ -728,8 +765,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         self.forw_stream.socket.setsockopt(socket.IPPROTO_TCP,
                                            socket.SO_KEEPALIVE, 1)
 
-
-
     @tornado.gen.coroutine
     def on_forwarder_disconnect(self):
         """The forwarder has disconnected from us."""
@@ -738,7 +773,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         # Prepare to stop the Tornado IOLoop, since the forwarding-proxy has
         # disconnected from us
-        # TODO: should a new connection tried to be re-opened to the upstream?
+        # TODO: should it retry to re-open a new connection to upstream?
         # ie, to the forwarding proxy? If so, how many times to attempt
         # reconnecting?
         ioloop = tornado.ioloop.IOLoop.instance()
@@ -748,8 +783,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         yield []
         self.log(3, "forwarding-proxy has disconnected from us")
         return
-
-
 
     @tornado.gen.coroutine
     def _handle_read_back_from_forwrdr(self, line_answered_back_from_forwdr):
@@ -791,7 +824,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         if not self._dont_add_perf_headers:
             # we had added our annotation inside this line, so we expect
             # to find our annotation key in this dictionary
-            if not self._initial_annotation_key in object_answered:
+            if self._initial_annotation_key not in object_answered:
                 self.log(3, "We didn't find our annotation key '{}' back"
                          " in the line answered back from forwarder: {}",
                          self._initial_annotation_key,
@@ -800,14 +833,17 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
                 # our annotation key is inside the object_answered from forwrdr
                 original_time = object_answered[self._initial_annotation_key]
                 try:
-                    # Our annotation was an "int", so try to decode it back
-                    original_time = int(original_time)
-                    curr_epoch_in_millis = int(time.time() * 1000)
-                    delay_millis = str(curr_epoch_in_millis - original_time)
+                    # Our annotation was an "float", so try to decode it back
+                    original_time = float(original_time)
+                    now = datetime.now()
+                    global EPOCH_ORIGIN
+                    delta_epoch = (now - EPOCH_ORIGIN)
+                    curr_epoch = delta_epoch.seconds + delta_epoch.microseconds / 1000000
+                    delay_micros = str(curr_epoch - original_time)
                     # annotate the packet with our final key
-                    object_answered[self._final_annotation_key] = delay_millis
+                    object_answered[self._final_annotation_key] = delay_micros
                 except ValueError:
-                    self.log(3, "We didn't find our integer annotation, but a"
+                    self.log(3, "We didn't find our float-pt annotation, but a"
                              " generic string annotation '{}' as value for our"
                              " annotation key '{}' in the line answered back"
                              " from forwarder: {}",
@@ -818,7 +854,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
                     # the answering packet is doing its return trip, so delete
                     # the old annotation key
                     del object_answered[self._initial_annotation_key]
-
 
         # dump the annotations received from the network loop to std-out
         # Note that this dump is not affected by the value of our
@@ -842,7 +877,6 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         # yield self._read_line_back_from_forwarder()
 
 
-
 #
 # function run_listener(...):
 #
@@ -863,7 +897,7 @@ def run_listener(listen_addr, forwarding_dest=None,
 
     # http://tornado.readthedocs.org/en/latest/tcpserver.html
     if listen_addr.find(":") != -1:
-       # there is a local address to which to listen to
+        # there is a local address to which to listen to
         local_addr, local_port = listen_addr.split(":")
     else:
         local_addr = ""
@@ -877,7 +911,6 @@ def run_listener(listen_addr, forwarding_dest=None,
 
     ioloop = tornado.ioloop.IOLoop.instance()
     ioloop.start()
-
 
 
 #
@@ -902,9 +935,7 @@ def run_forwarder(forward_to_addr, dont_add_perf_headers=False,
     ioloop.start()
 
 
-
-#### MAIN FUNCTION #####
-
+#  *** MAIN FUNCTION ***
 def main():
     """Main() entry-point to this script."""
 
@@ -918,7 +949,7 @@ def main():
     current_python_script_pathname = inspect.getfile(inspect.currentframe())
     dummy_pyscript_dirname, pyscript_filename = \
                 os.path.split(os.path.abspath(current_python_script_pathname))
-    pyscript_filename = os.path.splitext(pyscript_filename)[0] # no extension
+    pyscript_filename = os.path.splitext(pyscript_filename)[0]  # no extension
     pyscript_metadata = __import__(pyscript_filename)
     pyscript_docstring = pyscript_metadata.__doc__
 
@@ -979,6 +1010,6 @@ def main():
         sys.stderr.write(pyscript_docstring + "\n")
 
 
+EPOCH_ORIGIN = datetime(1970, 1, 1)
 if __name__ == '__main__':
     main()
-
