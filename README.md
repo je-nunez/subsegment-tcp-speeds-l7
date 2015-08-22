@@ -108,13 +108,17 @@ Formally, it works as chain of network proxies with send measure headers among e
 
 # Example:
 
-      This is an example with four hosts making up the chain of communication sub-segments in
-      the network, the client A works with (connects to) B, B to C, and C to Z.
+In the `examples` subdirectory of this project there is a simple set of wrappers
+to be used around this script.
 
-      B can be in another co-location or geographically remote in comparison to A, or be an
-      entry point with heavy-load to another network, etc. The same applies with C in
-      comparison to B, it can be in another co-location or geographically remote in
-      comparison to C, etc; and so on in this delay-sensitive computer network.
+A more general case with four layers of hosts making up the chain of communication
+sub-segments in the network, the client layer `A` works with (connects to) next layer 
+`B`, `B` to hops in layer `C`, and `C` to the backend layer `Z`. Layer `B` can be in
+another co-location or geographically remote in comparison to `A`, or be an entry
+point with heavy-load to another network, etc. The same applies with `C` in comparison
+to `B`, it can be in another co-location or geographically remote in comparison to
+`C`, etc; and so on in this delay-sensitive computer network: annotations can help to
+distinguish which `instance` in which `layer` the network packet has passed through:
 
            source host A:
 
