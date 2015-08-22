@@ -367,7 +367,8 @@ class EstablishedListener(BaseAnnotatedConnection):
         """Read a line from the incoming client, which doesn't have our
         annotations yet (it is the first time this line is seen by us)."""
 
-        self.client_stream.read_until('\n', self._handle_read_from_client)
+        if not self.client_stream.reading():
+            self.client_stream.read_until('\n', self._handle_read_from_client)
 
     @tornado.gen.coroutine
     def _read_line_back_from_forwarder(self):
@@ -386,10 +387,10 @@ class EstablishedListener(BaseAnnotatedConnection):
         does insert its own annotations into the packet independently of the
         other proxies in the chain:
 
-            X_My_Annotation_<client_1>_<cookie1>: <value-from-client-1>
-            X_My_Annotation_<client_2>_<cookie2>: <value-from-client-2>
+            X_My_Annotation_<network_hop_1>_<cookie1>: <value-from-netw-hop-1>
+            X_My_Annotation_<network_hop_2>_<cookie2>: <value-from-netw-hop-2>
             ...
-            X_My_Annotation_<client_N>_<cookieN>: <value-from-client-N>
+            X_My_Annotation_<network_hop_N>_<cookieN>: <value-from-netw-hop-N>
 
         it is true too that each proxy will try to use the same <cookie> (or
         'salt') as it has received from its client proxy (ie, all of
@@ -678,12 +679,11 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         """EOF on our standard-input."""
         self.log(7, "on_stdinput_eof")
 
-        # Prepare to stop the Tornado IOLoop, since there is the EOF of
-        # standard-input, ie., there is no more lines (from stdin) to forward
-
-        ioloop = tornado.ioloop.IOLoop.instance()
-        ioloop.remove_handler(0)
-        ioloop.add_callback(lambda x: x.stop(), ioloop)
+        # We stop the Tornado IOLoop if the forwarder is not connected
+        if not self.forw_stream or self.forw_stream.closed():
+            ioloop = tornado.ioloop.IOLoop.instance()
+            ioloop.remove_handler(0)
+            ioloop.add_callback(lambda x: x.stop(), ioloop)
 
         yield []
         self.log(3, "EOF-standard-input")
@@ -698,16 +698,19 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
     def _read_line_from_std_input(self):
         """Read a line from the standard input, which doesn't have our
         annotations yet."""
-
-        self.stdin.read_until('\n', self._handle_read_from_std_input)
+        try: 
+            self.stdin.read_until('\n', self._handle_read_from_std_input)
+        except tornado.iostream.StreamClosedError:
+            pass
 
     @tornado.gen.coroutine
     def _read_line_back_from_forwarder(self):
         """Read a line which the forwarding proxy has answered back to us.
         So this line has already passed through us, so it was then annotated
         by us."""
-
-        self.forw_stream.read_until('\n', self._handle_read_back_from_forwrdr)
+        if not self.forw_stream.closed():
+            self.forw_stream.read_until('\n',
+                                        self._handle_read_back_from_forwrdr)
 
     @tornado.gen.coroutine
     def _handle_read_from_std_input(self, input_line):
@@ -1005,11 +1008,10 @@ def cur_tstamp_microseconds():
     if not hasattr(cur_tstamp_microseconds, 'EPOCH_ORIGIN'):
         cur_tstamp_microseconds.EPOCH_ORIGIN = datetime(1970, 1, 1)
     now = datetime.utcnow()
-    delta_epoch = (now - cur_tstamp_microseconds.EPOCH_ORIGIN)
-    # A more efficient and __portable__ method should be found without calling
-    #    floor(...total_seconds()) and then multipling by 10**6
-    epoch = int(math.floor(delta_epoch.total_seconds()))
-    return delta_epoch.microseconds + epoch * 10**6
+    epoch = (now - cur_tstamp_microseconds.EPOCH_ORIGIN)
+    # A faster but __portable__ method should be found to avoid the division
+    # by 10**6 inside ".total_seconds()" and then multipling by 10**6 immediat
+    return int(math.floor(epoch.total_seconds() * 10**6))
 
 
 if __name__ == '__main__':
