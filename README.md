@@ -221,8 +221,3 @@ and switches send flow information outband (see `RFCs 7011 and 7015`). This idea
 used, eg., in Linux, by the `conntrackd` daemon and the `conntrack` command-line
 program can do statistics gathering.
 
-
-# Current state
-
-The old version was substituted by a new one based on the Tornado framework (with basic `TCPServer`s and `IOStream`s) since it has less issues with concurrency. The old version is still available here.
-
