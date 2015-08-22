@@ -5,6 +5,8 @@
 # that is a Tornado HTTPproxy in the PyPi repo (but this script is a TCP proxy)
 #
 # pylint: disable=too-many-arguments
+# .... this prg is now a little (2%) too big, needs to be split in modules
+# pylint: disable=too-many-lines
 
 """Program for helping to isolate which sub-segment in a network [or proxy host
 in a network] influences more in the delay of a network transmission.
@@ -133,7 +135,7 @@ import argparse
 from argparse import RawDescriptionHelpFormatter
 import inspect
 from datetime import datetime
-# import time
+import math
 import socket
 import re
 import random
@@ -146,8 +148,6 @@ import tornado.tcpclient
 import tornado.tcpserver
 
 # The origin of the Unix time (the origin of the Epoch)
-
-EPOCH_ORIGIN = None
 
 # On debugging (option -d <debug_level>)
 #
@@ -163,7 +163,6 @@ EPOCH_ORIGIN = None
 #    Critical  =  2
 #    Alert     =  1
 #    Emergency =  0
-
 
 #
 # class BaseAnnotatedConnection(object):
@@ -482,11 +481,8 @@ class EstablishedListener(BaseAnnotatedConnection):
                 # Our cookie has still its random initial value, so try to
                 # clone the same cookie received from the client
                 self._clone_transaction_cookie(object_read)
-            now = datetime.now()
-            global EPOCH_ORIGIN
-            delta_epoch = (now - EPOCH_ORIGIN)
-            value = delta_epoch.seconds + delta_epoch.microseconds / 1000000
-            object_read[self._initial_annotation_key] = str(value)
+            value = cur_tstamp_microseconds()
+            object_read[self._initial_annotation_key] = '%d' % value
             self.log(7, "Annoting with time %d" % value)
 
         json_annotated_object = tornado.escape.json_encode(object_read)
@@ -564,17 +560,15 @@ class EstablishedListener(BaseAnnotatedConnection):
                 # our annotation key is inside the object_answered from forwrdr
                 original_time = object_answered[self._initial_annotation_key]
                 try:
-                    # Our annotation was an "float", so try to decode it back
-                    original_time = float(original_time)
-                    now = datetime.now()
-                    global EPOCH_ORIGIN
-                    delta_epoch = (now - EPOCH_ORIGIN)
-                    curr_epoch = delta_epoch.seconds + delta_epoch.microseconds / 1000000
-                    delay_micros = str(curr_epoch - original_time)
+                    # Our annotation was an "int", so try to decode it back
+                    original_time = int(original_time)
+                    curr_epoch = cur_tstamp_microseconds()
+                    delay_micros = '%d microsecs' % \
+                                              (curr_epoch - original_time)
                     # annotate the packet with our final key
                     object_answered[self._final_annotation_key] = delay_micros
                 except ValueError:
-                    self.log(3, "We didn't find our float-pt annotation, but a"
+                    self.log(3, "We didn't find our integer annotation, but a"
                              " generic string annotation '{}' as value for our"
                              " annotation key '{}' in the line answered back"
                              " from forwarder: {}",
@@ -732,10 +726,8 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         # annotate this line (dictionary) adding our headers
         if not self._dont_add_perf_headers:
-            now = datetime.now()
-            delta_epoch = (now - EPOCH_ORIGIN)
-            value = delta_epoch.seconds + delta_epoch.microseconds / 1000000
-            dict_repr[self._initial_annotation_key] = str(value)
+            value = cur_tstamp_microseconds()
+            dict_repr[self._initial_annotation_key] = '%d' % value
 
         # convert our dictionary to a JSON object before transmission
         json_annotated_object = tornado.escape.json_encode(dict_repr)
@@ -833,17 +825,15 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
                 # our annotation key is inside the object_answered from forwrdr
                 original_time = object_answered[self._initial_annotation_key]
                 try:
-                    # Our annotation was an "float", so try to decode it back
-                    original_time = float(original_time)
-                    now = datetime.now()
-                    global EPOCH_ORIGIN
-                    delta_epoch = (now - EPOCH_ORIGIN)
-                    curr_epoch = delta_epoch.seconds + delta_epoch.microseconds / 1000000
-                    delay_micros = str(curr_epoch - original_time)
+                    # Our annotation was an "int", so try to decode it back
+                    original_time = int(original_time)
+                    curr_epoch = cur_tstamp_microseconds()
+                    delay_micros = '%d microsecs' % \
+                                              (curr_epoch - original_time)
                     # annotate the packet with our final key
                     object_answered[self._final_annotation_key] = delay_micros
                 except ValueError:
-                    self.log(3, "We didn't find our float-pt annotation, but a"
+                    self.log(3, "We didn't find our integer annotation, but a"
                              " generic string annotation '{}' as value for our"
                              " annotation key '{}' in the line answered back"
                              " from forwarder: {}",
@@ -1010,6 +1000,17 @@ def main():
         sys.stderr.write(pyscript_docstring + "\n")
 
 
-EPOCH_ORIGIN = datetime(1970, 1, 1)
+def cur_tstamp_microseconds():
+    """Returns the current timestamp (epoch) in microseconds as an integer."""
+    if not hasattr(cur_tstamp_microseconds, 'EPOCH_ORIGIN'):
+        cur_tstamp_microseconds.EPOCH_ORIGIN = datetime(1970, 1, 1)
+    now = datetime.utcnow()
+    delta_epoch = (now - cur_tstamp_microseconds.EPOCH_ORIGIN)
+    # A more efficient and __portable__ method should be found without calling
+    #    floor(...total_seconds()) and then multipling by 10**6
+    epoch = int(math.floor(delta_epoch.total_seconds()))
+    return delta_epoch.microseconds + epoch * 10**6
+
+
 if __name__ == '__main__':
     main()
