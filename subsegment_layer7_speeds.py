@@ -15,11 +15,11 @@ each proxy in the chain.
 
 Invocation:
 
-     subsegment-speeds.py  [-{l|-listen} <listen-addr>]
-                           [-{f|-forward_to} <forward_to-address>]
-                           [-{d|-debug} <debug-level>]
-                           [-{n|-dont-add-perf-headers}]
-                           [-{t|-add-static-tags} <static-annotations>]
+     subsegment_layer7_speeds.py  [-{l|-listen} <listen-addr>]
+                                  [-{f|-forward_to} <forward_to-address>]
+                                  [-{d|-debug} <debug-level>]
+                                  [-{n|-dont-add-perf-headers}]
+                                  [-{t|-add-static-tags} <static-annotations>]
 
      Command-line arguments:
 
@@ -79,8 +79,8 @@ Example:
 
            source host in layer A:
 
-                    subsegment-tcp-speeds.py  --forward_to  <layer-B>:9000 \
-                                              --add-static-tags `hostname`
+                    subsegment_layer7_speeds.py  --forward_to  <layer-B>:9000 \
+                                                 --add-static-tags `hostname`
 
                         In this case, A forwards its standard-input to the
                         proxies at layer B, and gets its answer (and
@@ -90,9 +90,9 @@ Example:
 
            intermediate host in proxy layer B:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'  \
-                                              --forward_to  <host-C>:9000 \
-                                              --add-static-tags `hostname`
+                    subsegment_layer7_speeds.py  --listen  '*:9000'  \
+                                                 --forward_to  <host-C>:9000 \
+                                                 --add-static-tags `hostname`
 
                         In this case, B forwards its standard-input to the
                         proxies at layer C, and gets its answer (and time-delay
@@ -102,9 +102,9 @@ Example:
 
            intermediate host in proxy layer C:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000' \
-                                              --forward_to  <host-Z>:9000 \
-                                              --add-static-tags `hostname`
+                    subsegment_layer7_speeds.py  --listen  '*:9000' \
+                                                 --forward_to  <host-Z>:9000 \
+                                                 --add-static-tags `hostname`
 
                         In this case, layer C forwards its incoming packets to
                         the layer Z, and gets its answer (and time-delay stats)
@@ -112,8 +112,8 @@ Example:
 
            end host in backend layer Z:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000' \
-                                              --add-static-tags `hostname`
+                    subsegment_layer7_speeds.py  --listen  '*:9000' \
+                                                 --add-static-tags `hostname`
 
                         In this case, Z doesn't use a --forward_to option, so
                         it is the end backend which resolves client A's initial
