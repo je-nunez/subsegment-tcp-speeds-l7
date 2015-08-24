@@ -18,6 +18,24 @@ of proxies-, and finally a layer of `backend servers`):
 
       wrapper_final_backend_server.sh     uses option "--listen ..." alone
 
+An example output, after some lines have been input into the `original client`, is:
+
+      <-- Delay between 127_0_0_1_64840 and localhost_9090 = 496 microsecs
+      <-- Delay between stdin and localhost_9090 = 969 microsecs
+      ...
+      < Line: .... my line # 1 ...
+      ...
+      ...
+      <-- Delay between 127_0_0_1_64840 and localhost_9090 = 470 microsecs
+      <-- Delay between stdin and localhost_9090 = 980 microsecs
+      ...
+      < Line: .... my line # 2 ...
+      ...
+
+so it is giving the delays (in microseconds) between each layer-7 in the
+communication chain. (This is without `static-tags` and `debug` options,
+explained below.)
+
 In all cases, the invocation of the main program is with `--debug 7`, which
 asks the program to dump the annotations inside the packets as they travel
 through each layer-7 hop, and not merely prints the summary of the final
