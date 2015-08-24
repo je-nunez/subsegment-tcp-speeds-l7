@@ -33,8 +33,10 @@ An example output, after some lines have been input into the `original client`, 
       ...
 
 so it is giving the delays (in microseconds) between each layer-7 in the
-communication chain. (This is without `static-tags` and `debug` options,
-explained below.)
+communication chain. (This output sample above does not mention other
+annotations and other information offered by `static-tags` and `debug`
+options -see below- which are independent to the dynamic annotations in
+the packets computed by the program.)
 
 In all cases, the invocation of the main program is with `--debug 7`, which
 asks the program to dump the annotations inside the packets as they travel
