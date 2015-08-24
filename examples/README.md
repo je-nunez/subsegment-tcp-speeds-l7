@@ -23,6 +23,14 @@ asks the program to dump the annotations inside the packets as they travel
 through each layer-7 hop, and not merely prints the summary of the final
 measures.
 
+Besides, these examples also use the `--add-static-tags $( hostname )`
+to insert a static annotation inside the packet identifying which specific
+instance among the several instances in a pooled layer processed the packet,
+plus other `--add-static-tags "any-static-annotation-string"` options.
+(These static annotations are given at the command-line and are different
+than the dynamic annotations inserted into a packet, which are computed
+inside the program.)
+
 # See also
 
 The ![README](../README.md "README") of the main project has more details.

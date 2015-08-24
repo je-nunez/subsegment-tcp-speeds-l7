@@ -4,8 +4,7 @@
 #     https://pypi.python.org/pypi/quickproxy/0.2.0
 # that is a Tornado HTTPproxy in the PyPi repo (but this script is a TCP proxy)
 #
-# pylint: disable=too-many-arguments
-# .... this prg is now a little (2%) too big, needs to be split in modules
+# .... this prg is now a little (9%) too big, needs to be split in modules
 # pylint: disable=too-many-lines
 
 """Program for helping to isolate which sub-segment in a network [or proxy host
@@ -19,7 +18,8 @@ Invocation:
      subsegment-speeds.py  [-{l|-listen} <listen-addr>]
                            [-{f|-forward_to} <forward_to-address>]
                            [-{d|-debug} <debug-level>]
-                           [-{r|-remove-perf-headers}]
+                           [-{n|-dont-add-perf-headers}]
+                           [-{t|-add-static-tags} <static-annotations>]
 
      Command-line arguments:
 
@@ -29,8 +29,8 @@ Invocation:
           -{l|-listen} <listen-addr>:    which TCP address:port to listen for
                                          incoming packets. (default: none)
 
-                                        If this option -{l|-listen} is not used,
-                                        the program will read from the
+                                        If this option -{l|-listen} is not
+                                        used, the program will read from the
                                         standard-input as fast as possible,
                                         inserting performance-headers every
                                         -{b|-block} bytes of read-data; the
@@ -38,32 +38,38 @@ Invocation:
                                         to std-output.
 
 
-          -{f|-forward_to} <forward_to-address>:       to which TCP address:port
-                                                       to forward the input data
-                                                       (default: none)
+          -{f|-forward_to} <forward_to-address>:     to which TCP address:port
+                                                     to forward the input data
+                                                     (default: none)
 
-                                        The input data forwarded is the one read
-                                        either by the -{l|-listen} address, or
-                                        by standard-input if the -{l|-listen}
-                                        address is omitted.
+                                        The input data forwarded is the one
+                                        read either by the -{l|-listen}
+                                        address, or by standard-input if the
+                                        -{l|-listen} address is omitted.
 
                                         If -{f|-forward_to} is omitted, then
                                         there will be no forwarding, and this
-                                        command invocation will echo-back to the
-                                        -{l|-listen} address whatever it
+                                        command invocation will echo-back to
+                                        the -{l|-listen} address whatever it
                                         receives from it.
 
 
-          -{n|-dont-add-perf-headers}:     Whether to add or not the performance
-                                         headers belonging to this hop in the
-                                         packets (default: add them)
+          -{n|-dont-add-perf-headers}:     Whether to add or not the dynamic
+                                           performance headers belonging to
+                                           this hop in the packets (default:
+                                           add them)
 
+          -{t|-add-static-tags}:     Static tags (headers) with which to
+                                     annotate the incoming packets (these tags
+                                     are not computed dynamically by the
+                                     program, they are just enumerared in the
+                                     command-line)
 
 Example:
 
       This is an example with four hosts making up the chain of communication
-      sub-segments in the network, the client A works with (connects to) B, B to
-      C, and C to Z.
+      sub-segments in the network, the client A works with (connects to) B, B
+      to C, and C to Z.
 
       B can be in another co-location or geographically remote in comparison to
       A, or be an entry point with heavy-load to another network, etc. The same
@@ -71,38 +77,49 @@ Example:
       geographically remote in comparison to C, etc; and so on in this
       delay-sensitive computer network.
 
-           source host A:
+           source host in layer A:
 
-                    subsegment-tcp-speeds.py  --forward_to  <host-B>:9000
+                    subsegment-tcp-speeds.py  --forward_to  <layer-B>:9000 \
+                                              --add-static-tags `hostname`
 
-                        In this case, A forwards its standard-input to the proxy
-                        at B, and gets its answer (and time-delay stats) from B.
+                        In this case, A forwards its standard-input to the
+                        proxies at layer B, and gets its answer (and
+                        time-delay stats) from B. Besides, it also adds a
+                        static header, the `hostname` of the source host at
+                        this layer A.
 
-           intermediate host B:
+           intermediate host in proxy layer B:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'
-                                              --forward_to  <host-C>:9000
+                    subsegment-tcp-speeds.py  --listen  '*:9000'  \
+                                              --forward_to  <host-C>:9000 \
+                                              --add-static-tags `hostname`
 
-                        In this case, B forwards its standard-input to the proxy
-                        at C, and gets its answer (and time-delay stats) from C.
+                        In this case, B forwards its standard-input to the
+                        proxies at layer C, and gets its answer (and time-delay
+                        stats) from C. Besides, it also adds a static header,
+                        the `hostname` of the hop in this layer B that
+                        forwarded the packet.
 
-           intermediate host C:
+           intermediate host in proxy layer C:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'
-                                              --forward_to  <host-Z>:9000
+                    subsegment-tcp-speeds.py  --listen  '*:9000' \
+                                              --forward_to  <host-Z>:9000 \
+                                              --add-static-tags `hostname`
 
-                        In this case, C forwards its standard-input to the proxy
-                        at Z, and gets its answer (and time-delay stats) from Z.
+                        In this case, layer C forwards its incoming packets to
+                        the layer Z, and gets its answer (and time-delay stats)
+                        from Z.
 
-           end host Z:
+           end host in backend layer Z:
 
-                    subsegment-tcp-speeds.py  --listen  '*:9000'
+                    subsegment-tcp-speeds.py  --listen  '*:9000' \
+                                              --add-static-tags `hostname`
 
-                        In this case, Z doesn't use a --forward_to option, so it
-                        is the end backend which resolves client A's initial
+                        In this case, Z doesn't use a --forward_to option, so
+                        it is the end backend which resolves client A's initial
                         request. This script simply echoes back the initial
-                        request, so it sends back A's standard-input back to A
-                        (and time-delay stats)."""
+                        request, so it answers A's standard-input back to A
+                        (and time-delay stats and static-tags)."""
 
 
 # The difference of this script is that it works in ISO/OSI layer 7: traceroute,
@@ -164,6 +181,7 @@ import tornado.tcpserver
 #    Alert     =  1
 #    Emergency =  0
 
+
 #
 # class BaseAnnotatedConnection(object):
 #
@@ -183,34 +201,33 @@ class BaseAnnotatedConnection(object):
                  the final annotation key (when the return, answer packet
                  exits this network hop
 
-        _log_verbosity
-                 the level of verbosity in the logs above which the messages
-                 will be silently ignored
+        _static_annotation_key
+                 the static annotation key for annotations that are not
+                 dynamic or computed (these static annotations are only
+                 inserted when the packet first enters this hop: they
+                 are not inserted when the packet returns)
 
         _log_tag_preffix
                  the tag with which to prefix the log messages printed
 
     Methods:
-        self.__init__(string1, string2, log_verbosity, log_tag_preffix):
+        self.__init__(string1, string2, log_tag_preffix):
                      constructor. Builds the above two fields of the
                      annotation keys from the parameters string1 and
                      string2.
-                     The log_verbosity and log_tag parameters go to
-                     the corresponding fields.
+                     The log_tag parameters go to the corresponding fields.
 
        self.log(severity, msg, *args, **kwargs):
                      Writes a message if the severity of the msg is the
-                     same or lower than self._log_verbosity
+                     same or lower than Config.log_verbosity
     """
 
-    def __init__(self, string1, string2, log_verbosity, log_tag_preffix):
+    def __init__(self, string1, string2, log_tag_preffix):
+
         # first, clear the chactacters in both string[12]
         self._initiator_str = re.sub(r"[^a-zA-Z0-9]", "_", string1)
         self._next_hop_str = re.sub(r"[^a-zA-Z0-9]", "_", string2)
         self._general_log_tag = log_tag_preffix
-
-        # The debug log level and msg-preffix to use for this instance
-        self._log_verbosity = log_verbosity
 
         # build the final annotation key (when the return, answer packet
         # exits this network hop). This final annotation doesn't have
@@ -219,29 +236,50 @@ class BaseAnnotatedConnection(object):
                                     (self._initiator_str, self._next_hop_str)
         self._final_annotation_key = annotation_fieldname_uuid
 
+        # Not initialized yet (see call to self.set_cookie() below here)
+        self._initial_annotation_key = None
+        self._static_annotation_key = None
+        self._log_tag_preffix = None
+
         # build the very initial annotation cookie (salt) (before the packet
         # first enters this network hop)
         self.set_cookie(str(random.randint(0, 10000000)))
 
     def peek_possible_annotation_key(self, cookie):
-        """Peek the possible annotation key for a cookie."""
-        return "X_My_Annotation_%s_%s_%s" % \
-                    (self._initiator_str, self._next_hop_str, cookie)
+        """Peek the possible annotation keys (dynamic and static) that would
+        be set given a cookie."""
+        dynamic_annotations_key = "%s%s_%s_%s" % \
+                    (Config.prefix_all_dynamic_annotations,
+                     self._initiator_str, self._next_hop_str, cookie)
+        static_annotations_key = "%s%s_%s_%s" % \
+                    (Config.prefix_all_static_annotations,
+                     self._initiator_str, self._next_hop_str, cookie)
+        return (dynamic_annotations_key, static_annotations_key)
 
     def set_cookie(self, cookie):
         """Some values we annotate into the packets or log, append a cookie
         for easier identification and tracking across the chain of proxies."""
 
         # set the self._initial_annotation_key according to the given cookie
-        self._initial_annotation_key = "X_My_Annotation_%s_%s_%s" % \
-              (self._initiator_str, self._next_hop_str, cookie)
+        self._initial_annotation_key = "%s%s_%s_%s" % \
+                    (Config.prefix_all_dynamic_annotations,
+                     self._initiator_str, self._next_hop_str, cookie)
+        self._static_annotation_key = "%s%s_%s_%s" % \
+                    (Config.prefix_all_static_annotations,
+                     self._initiator_str, self._next_hop_str, cookie)
 
         self._log_tag_preffix = '%s -%s' % (self._general_log_tag, cookie)
+
+    def do_static_annotations(self, network_packet_dict):
+        """Write the static annotations inside a network packet (dict)."""
+        if Config.static_annotations:
+            annotation_key = self._static_annotation_key
+            network_packet_dict[annotation_key] = Config.static_annotations
 
     def log(self, msg_severity, msg, *args, **kwargs):
         """Print the log message if its severity is important enough."""
 
-        if msg_severity <= self._log_verbosity:
+        if msg_severity <= Config.log_verbosity:
             sys.stderr.write("[{}]: {}\n".format(self._log_tag_preffix,
                                                  msg.format(*args, **kwargs)))
 
@@ -256,8 +294,7 @@ class EstablishedListener(BaseAnnotatedConnection):
         forwarding connection to the next proxy if it applies)
     """
 
-    def __init__(self, stream, client_addr, local_addr, forwarding_dest,
-                 dont_add_perf_headers, log_verbosity):
+    def __init__(self, stream, client_addr, local_addr, forwarding_dest):
         """Instance constructor.
            Arguments:
 
@@ -265,12 +302,10 @@ class EstablishedListener(BaseAnnotatedConnection):
               client_addr: the client address that connected to us
               local_addr: our local address that accepted the incoming conn.
               forwarding_dest: the next proxy addr to which to forward (if any)
-              dont_add_perf_headers: don't annotate packets in this instance
-              log_verbosity: the minimum severity of log-messages to report
         """
         # Call the inherited constructor in our base class
-        BaseAnnotatedConnection.__init__(self, local_addr, client_addr,
-                                         log_verbosity, client_addr)
+        BaseAnnotatedConnection.__init__(self, client_addr, local_addr,
+                                         client_addr)
 
         self.client_stream = stream
         stream.set_close_callback(self.on_incoming_client_disconnect)
@@ -280,7 +315,6 @@ class EstablishedListener(BaseAnnotatedConnection):
         self.client_addr = client_addr  # the client which connect()-ed to us
         self.forwarding_destination = forwarding_dest  # where to forward to
         self.forw_stream = None         # we still don't have a fwd connection
-        self._dont_add_perf_headers = dont_add_perf_headers
         self._cookie_cloned = False     # our cookie (or salt) is still random
 
     @tornado.gen.coroutine
@@ -402,7 +436,7 @@ class EstablishedListener(BaseAnnotatedConnection):
         # received from the client and we must re-use as our same <cookie>
         a_key = ''
         for key in incomming_dict_from_client:      # search incoming keys
-            if key.startswith('X_My_Annotation_'):  # search is sucessful
+            if key.startswith(Config.prefix_all_annotations):  # sucessful
                 a_key = key
                 break
 
@@ -422,12 +456,16 @@ class EstablishedListener(BaseAnnotatedConnection):
         # The value of the incoming key is 'X_My_Annotation_..._<cookie>', so
         # we try to split it by '_' and get the last value, that is the cookie
         client_cookie = a_key.rpartition('_')[-1]
-        my_possible_key = self.peek_possible_annotation_key(client_cookie)
-        # Check if 'my_possible_key' for annotating is not already in use by
-        # another client for its own annotation, so I don't overwrite its
-        # annotations
-        if my_possible_key not in incomming_dict_from_client:
-            # ok: no other client has used my possible key for its annotations
+        # Check if the keys this network hop would us for annotating with this
+        # cookie is not already in use by another client for its own
+        # annotations inside the packet, for then our annotations would use
+        # the same keys and would collide/overwrite with that client
+        (my_possible_dynamic_key, my_possible_static_key) = \
+                        self.peek_possible_annotation_key(client_cookie)
+        if my_possible_dynamic_key not in incomming_dict_from_client and \
+           my_possible_static_key not in incomming_dict_from_client:
+            # ok: no other client before has used my possible keys for its
+            #     own annotations inside the network packet
             old_log_tag_preffix = self._log_tag_preffix
             self.set_cookie(client_cookie)   # clone incoming client cookie
             self.log(7, "no longer using log-tag: '%s': hop has cloned the "
@@ -474,7 +512,7 @@ class EstablishedListener(BaseAnnotatedConnection):
         # At this point we have decoded in layer 7 the dictionary "object_read"
         # that the remote, incoming client has sent us.
 
-        if not self._dont_add_perf_headers:
+        if Config.do_dynamic_annotations:
             # we add our annotations in this packet. We only happen to annotate
             # our current epoch-time in milliseoconds, although we could add
             # more annotations
@@ -484,7 +522,9 @@ class EstablishedListener(BaseAnnotatedConnection):
                 self._clone_transaction_cookie(object_read)
             value = cur_tstamp_microseconds()
             object_read[self._initial_annotation_key] = '%d' % value
-            self.log(7, "Annoting with time %d" % value)
+            self.log(7, "Dynamically annotating with time %d" % value)
+
+        self.do_static_annotations(object_read)    # do the static annotations
 
         json_annotated_object = tornado.escape.json_encode(object_read)
 
@@ -549,7 +589,7 @@ class EstablishedListener(BaseAnnotatedConnection):
         # find our original annotation, that we put in the JSON object
         # before sending it to the next forwarding proxy, back in the
         # returned JSON object from the next forwarding proxy
-        if not self._dont_add_perf_headers:
+        if Config.do_dynamic_annotations:
             # we had added our annotation inside this line, so we expect
             # to find our annotation key in this dictionary
             if self._initial_annotation_key not in object_answered:
@@ -596,19 +636,16 @@ class ListeningServer(tornado.tcpserver.TCPServer):
         it accepts an incoming connections, creates the
         EstablishedListener instance to handle this incoming connection. """
 
-    def __init__(self, forwarding_dest, dont_add_perf_headers,
-                 log_verbosity):
+    def __init__(self, forwarding_dest):
         tornado.tcpserver.TCPServer.__init__(self)
         self._forwarding_destination = forwarding_dest
-        self._dont_add_perf_headers = dont_add_perf_headers
         self._local_address = ""  # we don't know yet where we should listen
-        self._log_verbosity = log_verbosity
 
     def listen(self, port, address=""):
         """ Listen at this local address, and prepare what is our address
         to insert it as a JSON key when we annotate the incoming lines"""
 
-        if self._log_verbosity >= 5:
+        if Config.log_verbosity >= 5:
             print "Starting TCP proxy on port %s" % port
 
         tornado.tcpserver.TCPServer.listen(self, port, address)
@@ -628,19 +665,17 @@ class ListeningServer(tornado.tcpserver.TCPServer):
         Create a new established-connection object to handle it."""
 
         client_address = "%s:%d" % (clnt_address[0], clnt_address[1])
-        if self._log_verbosity >= 5:
+        if Config.log_verbosity >= 5:
             sys.stderr.write("NOTICE: Accepting incoming connection from %s\n" %
                              client_address)
 
         conn = EstablishedListener(stream, client_address, self._local_address,
-                                   self._forwarding_destination,
-                                   self._dont_add_perf_headers,
-                                   self._log_verbosity)
+                                   self._forwarding_destination)
 
-        if self._log_verbosity == 7:
+        if Config.log_verbosity == 7:
             sys.stderr.write("DEBUG: yielding to c.prepare_incoming_connection")
         yield conn.prepare_incoming_connection()
-        if self._log_verbosity == 7:
+        if Config.log_verbosity == 7:
             sys.stderr.write("DEBUG: exiting handle_stream\n")
 
         return
@@ -658,16 +693,14 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         point of it.
     """
 
-    def __init__(self, forwarding_destination, dont_add_perf_headers,
-                 log_verbosity):
+    def __init__(self, forwarding_destination):
         BaseAnnotatedConnection.__init__(self, "stdin", forwarding_destination,
-                                         log_verbosity, forwarding_destination)
+                                         forwarding_destination)
 
         remote_addr, remote_port = forwarding_destination.split(":")
         self.forwarding_addr = remote_addr      # we need to forward to the next
         self.forwarding_port = int(remote_port)  # proxy to this address:port
         self.forw_stream = None   # we are not connected yet to this fwd proxy
-        self._dont_add_perf_headers = dont_add_perf_headers
         # convert sys.stdin to a Tornado IOStream, to read from it asynchron,
         self.stdin = tornado.iostream.PipeIOStream(sys.stdin.fileno())
         self.stdout = tornado.iostream.PipeIOStream(sys.stdout.fileno())
@@ -698,7 +731,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
     def _read_line_from_std_input(self):
         """Read a line from the standard input, which doesn't have our
         annotations yet."""
-        try: 
+        try:
             self.stdin.read_until('\n', self._handle_read_from_std_input)
         except tornado.iostream.StreamClosedError:
             pass
@@ -728,9 +761,11 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         dict_repr['line'] = str(input_line)
 
         # annotate this line (dictionary) adding our headers
-        if not self._dont_add_perf_headers:
+        if Config.do_dynamic_annotations:
             value = cur_tstamp_microseconds()
             dict_repr[self._initial_annotation_key] = '%d' % value
+
+        self.do_static_annotations(dict_repr)    # do the static annotations
 
         # convert our dictionary to a JSON object before transmission
         json_annotated_object = tornado.escape.json_encode(dict_repr)
@@ -816,7 +851,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
         # find our original annotation, that we put in the JSON object
         # before sending it to the next forwarding proxy, back in the
         # returned JSON object from the next forwarding proxy
-        if not self._dont_add_perf_headers:
+        if Config.do_dynamic_annotations:
             # we had added our annotation inside this line, so we expect
             # to find our annotation key in this dictionary
             if self._initial_annotation_key not in object_answered:
@@ -850,7 +885,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 
         # dump the annotations received from the network loop to std-out
         # Note that this dump is not affected by the value of our
-        # self._dont_add_perf_headers, because this forwarding-loop
+        # Config.do_dynamic_annotations, because this forwarding-loop
         # perhaps didn't add the performance annotations for this loop,
         # but other loops indirectly connected to this could have added
         # their respective annotations on performance headers, so we
@@ -878,8 +913,7 @@ class StdInputForwardingClient(BaseAnnotatedConnection):
 #   start the Tornado IOLoop
 #
 
-def run_listener(listen_addr, forwarding_dest=None,
-                 dont_add_perf_headers=False, debug_level=0):
+def run_listener(listen_addr, forwarding_dest=None):
 
     """ Run TCP proxy 'ListeningServer' on the specified 'listen_addr', to
         optionally forward to a next upstream proxy at address
@@ -898,8 +932,7 @@ def run_listener(listen_addr, forwarding_dest=None,
 
     local_port = int(local_port)
 
-    tcp_server = ListeningServer(forwarding_dest, dont_add_perf_headers,
-                                 debug_level)
+    tcp_server = ListeningServer(forwarding_dest)
     tcp_server.listen(port=local_port, address=local_addr)
 
     ioloop = tornado.ioloop.IOLoop.instance()
@@ -913,29 +946,55 @@ def run_listener(listen_addr, forwarding_dest=None,
 #   StdInputForwardingClient(...) and start the Tornado IOLoop
 #
 
-def run_forwarder(forward_to_addr, dont_add_perf_headers=False,
-                  debug_level=0):
+def run_forwarder(forward_to_addr):
     """ Run the forwarder from standard-input to a remote proxy, ie.,
         an object of the class StdInputForwardingClient()
 
         Start the Tornado IOLoop.
     """
 
-    stdin_readr = StdInputForwardingClient(forward_to_addr,
-                                           dont_add_perf_headers, debug_level)
+    stdin_readr = StdInputForwardingClient(forward_to_addr)
     ioloop = tornado.ioloop.IOLoop.instance()
     stdin_readr.read_first_line_from_std_input()
     ioloop.start()
+
+
+#
+# class Config(object):
+#
+
+class Config(object):              # pylint: disable=too-few-public-methods
+    """This class holds global config settings."""
+
+    # The default log verbosity: Debug=7, Info=6, Notice=5, Warning=4,
+    #                            Error=3, Critical=2, Alert=1, Emergency=0
+    log_verbosity = 5
+
+    # Whether to add dynamic (run-time computed) annotations inside the
+    # network packets passing through and back this hop or not
+    do_dynamic_annotations = True
+
+    # The prefixes for all our annotations, either static annotations or
+    # dynamic ones.
+    prefix_all_annotations = "X_My_Annotation_"
+    prefix_all_dynamic_annotations = prefix_all_annotations + "Dynamic_"
+    prefix_all_static_annotations = prefix_all_annotations + "Static_"
+
+    # This is the set of static annotations to add inside a packet. These
+    # annotations here are called 'static' because they don't depend on the
+    # context, as the most usual annotations do (eg., these annotate the
+    # exact timestamp in microseconds the packet entered through this network
+    # hop, or the delay in microseconds it took to return to this network
+    # hop).
+    static_annotations = None
 
 
 #  *** MAIN FUNCTION ***
 def main():
     """Main() entry-point to this script."""
 
-    debug_level = 5     # 0: emerg; ... 6: informational; 7: debug
     listen_port = None
     forward_to_addr = None
-    dont_add_perf_headers = False
 
     # Get the usage string from the doc-string of this script
     # (ie. usage_string := doc_string )
@@ -967,9 +1026,15 @@ def main():
     parser.add_argument('-n', '--dont-add-perf-headers',
                         default=False, required=False,
                         action='store_true',
-                        help='Whether to add or not the performance headers '
-                             'belonging to this hop in the packets '
+                        help='Whether to add or not the dynamic performance '
+                             'headers belonging to this hop in the packets '
                              '(default: add them)')
+    parser.add_argument('-t', '--add-static-tags', nargs=1, required=False,
+                        action='append', type=str,
+                        help='Static tags (headers) with which to annotate '
+                             'the incoming packets (these tags are not '
+                             'computed dynamically by the program, they are '
+                             'just enumerared in the command-line)')
 
     args = parser.parse_args()
 
@@ -981,18 +1046,25 @@ def main():
         if isinstance(args.debug, list):
             # this type check is necessary for some argparse.ArgumentParser()
             # installed in Mac OS/X
-            debug_level = args.debug[0]
+            Config.log_verbosity = args.debug[0]
         else:
             # normal case for argparse.ArgumentParser() in Linux
-            debug_level = args.debug
+            Config.log_verbosity = args.debug
     if args.dont_add_perf_headers:
-        dont_add_perf_headers = True
+        Config.do_dynamic_annotations = False
+    if args.add_static_tags:
+        if isinstance(args.add_static_tags, list):
+            # this type check is necessary for some argparse.ArgumentParser()
+            # installed in Mac OS/X
+            Config.static_annotations = args.add_static_tags
+        else:
+            # normal case for argparse.ArgumentParser() in Linux
+            Config.static_annotations = [args.add_static_tags]
 
     if listen_port:
-        run_listener(listen_port, forward_to_addr, dont_add_perf_headers,
-                     debug_level)
+        run_listener(listen_port, forward_to_addr)
     elif forward_to_addr:
-        run_forwarder(forward_to_addr, dont_add_perf_headers, debug_level)
+        run_forwarder(forward_to_addr)
     else:
         sys.stderr.write("ERROR:\nAt least one option of '-l|--listen' or "
                          "'-f|--forward_to', or both options\n"

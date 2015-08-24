@@ -66,7 +66,8 @@ Formally, it works as chain of network proxies with send measure headers among e
           subsegment_tcp_speeds.py   [-{l|-listen} <listen-addr>]
                                      [-{f|-forward_to} <forward_to-address>]
                                      [-{d|-debug} <debug-level>]
-                                     [-{r|-remove-perf-headers}]
+                                     [-{n|-dont-add-perf-headers}]
+                                     [-{t|-add-static-tags} <static-annotations>]
 
      Command-line arguments:
 
@@ -101,9 +102,16 @@ Formally, it works as chain of network proxies with send measure headers among e
                                         receives from it.
 
 
-          -{n|-dont-add-perf-headers}:     Whether to add or not the performance
-                                         headers belonging to this hop in the
-                                         packets (default: add them)
+          -{n|-dont-add-perf-headers}:     Whether to add or not the dynamic
+                                           performance headers belonging to
+                                           this hop in the packets (default:
+                                           add them)
+
+          -{t|-add-static-tags}:     Static tags (headers) with which to
+                                     annotate the incoming packets (these tags
+                                     are not computed dynamically by the
+                                     program, they are just enumerared in the
+                                     command-line)
 
 
 # Example:
@@ -120,37 +128,50 @@ to `B`, it can be in another co-location or geographically remote in comparison 
 `C`, etc; and so on in this delay-sensitive computer network: annotations can help to
 distinguish which `instance` in which `layer` the network packet has passed through:
 
-           source host A:
+           source host in layer A:
 
-                    subsegment_tcp_speeds.py  --forward-to  <host-B>:9000
+                    subsegment-tcp-speeds.py  --forward_to  <layer-B>:9000 \
+                                              --add-static-tags `hostname`
 
-                        In this case, A forwards its standard-input to the proxy at B, and
-                        gets its answer (and time-delay stats) from B.
+                        In this case, A forwards its standard-input to the
+                        proxies at layer B, and gets its answer (and
+                        time-delay stats) from B. Besides, it also adds a
+                        static header, the `hostname` of the source host at
+                        this layer A.
 
-           intermediate host B:
+           intermediate host in proxy layer B:
 
-                    subsegment_tcp_speeds.py  --listen  '*:9000'  \
-                                              --forward-to  <host-C>:9000
+                    subsegment-tcp-speeds.py  --listen  '*:9000'  \
+                                              --forward_to  <host-C>:9000 \
+                                              --add-static-tags `hostname`
 
-                        In this case, B forwards its standard-input to the proxy at C, and
-                        gets its answer (and time-delay stats) from C.
+                        In this case, B forwards its standard-input to the
+                        proxies at layer C, and gets its answer (and time-delay
+                        stats) from C. Besides, it also adds a static header,
+                        the `hostname` of the hop in this layer B that
+                        forwarded the packet.
 
-           intermediate host C:
+           intermediate host in proxy layer C:
 
-                    subsegment_tcp_speeds.py  --listen  '*:9000'  \
-                                              --forward-to  <host-Z>:9000
+                    subsegment-tcp-speeds.py  --listen  '*:9000' \
+                                              --forward_to  <host-Z>:9000 \
+                                              --add-static-tags `hostname`
 
-                        In this case, C forwards its standard-input to the proxy at Z, and
-                        gets its answer (and time-delay stats) from Z.
+                        In this case, layer C forwards its incoming packets to
+                        the layer Z, and gets its answer (and time-delay stats)
+                        from Z.
 
-           end host Z:
+           end host in backend layer Z:
 
-                    subsegment_tcp_speeds.py  --listen  '*:9000'
+                    subsegment-tcp-speeds.py  --listen  '*:9000' \
+                                              --add-static-tags `hostname`
 
-                        In this case, Z doesn't use a --forward-to option, so it is the
-                        end backend which resolves client A's initial request. This script
-                        simply echoes back the initial request, so it sends back A's
-                        standard-input back to A (and time-delay stats).
+                        In this case, Z doesn't use a --forward_to option, so
+                        it is the end backend which resolves client A's initial
+                        request. This script simply echoes back the initial
+                        request, so it answers A's standard-input back to A
+                        (and time-delay stats and static-tags)."""
+
 
 # Practical use:
 
