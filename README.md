@@ -224,9 +224,11 @@ performance `in extra fields` together with the answer, `harmless` in the sense 
 don't affect the main answer, which in general Redis doesn't allow us to do -unless the
 specific cached value in Redis happened to be a `JSON` object and the `Lua` script embeds
 the annotations about server-side performance in the answer as extra JSON fields through
-its `cjson` library, or the client understands the `MessagePack` binary encoding and the
-embedded wrapper uses the Lua `cmsgpack` library the Redis application server makes
-available to the script.)
+its `cjson` library, or we add the performance annotations in the answer through
+[deeply nested multi bulk replies in the Redis protocol] (http://redis.io/topics/protocol "multi bulk reply"),
+or similarly, the client understands and expects the `MessagePack` binary encoding and
+the embedded wrapper uses the Lua `cmsgpack` Lua library the Redis application server
+makes available to the script.)
 
 `nginx` and `PowerDns`, among others, are also other examples of such `application
 servers` which allow embedding (also of `Lua`, although not receiving remote Lua
