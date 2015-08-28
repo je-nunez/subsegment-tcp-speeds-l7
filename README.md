@@ -205,8 +205,35 @@ the case of dynamic, or self-organizing, networks.
 
 # Other tools and methods:
 
-Probably the most known are `ping`, `traceroute` (and similar, like `tcptraceroute`,
-etc).
+Another way is to `wrap` scriptable code which encapsulates the request to the server
+and to pass this `wrapping` code into the server to measure the timing from the server
+perspective, and then to compare that server-side timing with the client-side timing.
+In this case, the server does not serve `specific requests`, but is in certain way an
+`application server` which receives and executes the `remote scripts` submitted to it,
+giving to this script `an application library and environment` in a sandbox. Ie., the
+project:
+
+    https://github.com/je-nunez/timing_Redis_queries_with_embedded_LUA
+
+is an example of this submission of a `Lua` wrapper around a `GET` query into the `Redis`
+server, which acts as an `application server` in this case giving the `redis.call()`
+and `redis.pcall()` `application library and environment` to the incoming Lua script (plus
+others, like `redis.log()`, etc). (The difference between this project and the Redis/Lua
+one is that this second one doesn't allow to return back `harmless` annotations about
+performance `in extra fields` together with the answer, `harmless` in the sense that they
+don't affect the main answer, which in general Redis doesn't allow us to do -unless the
+specific cached value in Redis happened to be a `JSON` object and the `Lua` script embeds
+the annotations about server-side performance in the answer as extra JSON fields through
+its `cjson` library, or the client understands the `MessagePack` binary encoding and the
+embedded wrapper uses the Lua `cmsgpack` library the Redis application server makes
+available to the script.)
+
+`nginx` and `PowerDns`, among others, are also other examples of such `application
+servers` which allow embedding (also of `Lua`, although not receiving remote Lua
+scripts from the clients to execute, for security reasons.)
+
+Tools most known in lower-level layers in the protocol stack are `ping`, `traceroute`
+(and similar, like `tcptraceroute`, etc).
 
 The `TCP header` itself usually has a timestamp option (`RFC 1323`) which is used
 for Round-Trip Time Measurement, as well as `IP header` may have several timestamps,
@@ -220,7 +247,7 @@ as the utility in this project (`RFC 781` and `RFC 791`):
                    https://tools.ietf.org/html/rfc791 (chaining of several timestamps)
 
 The issue with these timestamps in the headers of the lower layers is that they
-are not passed to user-mode applications, so to obtain it you need to use the
+are not passed to user-mode applications, so to obtain them you need to use the
 `libpcap` (or equivalent) library, and that their timestamp is not in epoch time
 -even under synchronization by NTP in the network, but the relative `uptime` of
 the host, so two hosts A and B won't have the same timestamps unless they were boot
@@ -245,30 +272,4 @@ A different approach is the `IP Flow Information Export` protocol, where the rou
 and switches send flow information outband (see `RFCs 7011 and 7015`). This idea is
 used, eg., in Linux, by the `conntrackd` daemon and the `conntrack` command-line
 program can do statistics gathering.
-
-Another way is to `embed` scriptable code which encapsulates the request to the server
-and to pass this `wrapping` code into the server to measure the timing from the server
-perspective, and then to compare that server-side timing with the client-side timing.
-In this case, the server does not serve `specific requests`, but is in certain way an
-`application server` which receives and executes `remote scripts`, giving to this script
-`an application library and environment` in a sandbox. Ie., the project:
-
-    https://github.com/je-nunez/timing_Redis_queries_with_embedded_LUA
-
-is an example of this embedding a `Lua` wrapper around a `GET` query into the `Redis`
-server, which acts as an `application server` in this case giving the `redis.call()`
-and `redis.pcall()` `application library and environment` to the incoming script (plus
-others, like `redis.log()`, etc). (The difference between this project and the Redis/Lua
-one is that this second one doesn't allow to return back `harmless` annotations about
-performance in extra fields together with the answer, `harmless` in the sense that they
-don't affect the main answer, which in general Redis doesn't allow us to do -unless the
-specific cached value happened to be a `JSON` object and the `Lua` embeds the annotations
-about server-side performance in the answer as extra JSON fields through its `cjson`
-library, or the client understands the `MessagePack` binary encoding and the embedded
-wrapper uses the Lua `cmsgpack` library the Redis application server makes available to
-the script.)
-
-`nginx` and `PowerDns`, among others, are also other examples of such `application
-servers` which allow embedding (also of `Lua`, although not receiving the remote
-scripts to execute for security reasons.)
 
